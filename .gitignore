@@ -2,4 +2,5 @@
 **/__pycache__/
 
 # For the output of the models
-
+disentanglement/data/*
+disentanglement/checkpoints/*
