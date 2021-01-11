@@ -1,7 +1,7 @@
 """solver.py"""
 
 import os
-#import visdom
+import visdom
 from tqdm import tqdm
 
 import torch
@@ -59,7 +59,6 @@ class Solver(object):
 
         self.nets = [self.VAE, self.D]
 
-        """
         # Visdom
         self.viz_on = args.viz_on
         self.win_id = dict(D_z='win_D_z', recon='win_recon', kld='win_kld', acc='win_acc')
@@ -67,14 +66,13 @@ class Solver(object):
         self.image_gather = DataGather('true', 'recon')
         if self.viz_on:
             self.viz_port = args.viz_port
-            self.viz = visdom.Visdom(port=self.viz_port)
+            self.viz = visdom.Visdom(log_to_filename='./logging.log', offline=True)  # server='http://188.140.46.6' ,port=self.viz_port)
             self.viz_ll_iter = args.viz_ll_iter
             self.viz_la_iter = args.viz_la_iter
             self.viz_ra_iter = args.viz_ra_iter
             self.viz_ta_iter = args.viz_ta_iter
             if not self.viz.win_exists(env=self.name+'/lines', win=self.win_id['D_z']):
                 self.viz_init()
-        """
 
         # Checkpoint
         self.ckpt_dir = os.path.join(args.ckpt_dir, args.name)
@@ -131,7 +129,6 @@ class Solver(object):
                 if self.global_iter%self.ckpt_save_iter == 0:
                     self.save_checkpoint(self.global_iter)
 
-                """
                 if self.viz_on and (self.global_iter%self.viz_ll_iter == 0):
                     soft_D_z = F.softmax(D_z, 1)[:, :1].detach()
                     soft_D_z_pperm = F.softmax(D_z_pperm, 1)[:, :1].detach()
@@ -159,7 +156,6 @@ class Solver(object):
                         self.visualize_traverse(limit=2, inter=0.5)
                     else:
                         self.visualize_traverse(limit=3, inter=2/3)
-                """
 
                 if self.global_iter >= self.max_iter:
                     out = True
