@@ -14,10 +14,11 @@ import torch.nn.functional as F
 from torchvision.utils import make_grid, save_image
 
 from utils import DataGather, mkdirs, grid2gif
-from ops import recon_loss, kl_divergence, permute_dims
+from ops import recon_loss, kl_divergence, permute_dims, attention_disentanglement
 from model import FactorVAE1, FactorVAE2, Discriminator
 from dataset import return_data
 
+from gradcam import GradCamDissen
 
 # To achieve reproducible results with sequential runs
 torch.backends.cudnn.enabled = True
@@ -61,6 +62,8 @@ class Solver(object):
         if args.dataset == 'dsprites':
             self.VAE = FactorVAE1(self.z_dim).to(self.device)
             self.nc = 1
+            for m in self.VAE.named_modules():
+                print(m[0])
         else:
             self.VAE = FactorVAE2(self.z_dim).to(self.device)
             self.nc = 3
@@ -174,6 +177,92 @@ class Solver(object):
                         self.visualize_traverse(limit=3, inter=2/3)
                 """
 
+                if self.global_iter >= self.max_iter:
+                    out = True
+                    break
+
+        self.pbar.write("[Training Finished]")
+        self.pbar.close()
+
+    def select_attention_maps(self, maps):
+        """
+            Implements the mechanism of selection of the attention
+                maps to use in the attention disentanglement loss
+        """
+        return maps[0], maps[1]
+
+    def train_disentanglement(self):
+        #from test_FactorVAE import save_cam
+
+        gcam = GradCamDissen(self.VAE, self.D, target_layer='encode.10', cuda=True) # The FactorVAE encoder contains 6 layers
+        self.net_mode(train=True)  # TODO is this correct ?
+
+        ones = torch.ones(self.batch_size, dtype=torch.long, device=self.device)
+        zeros = torch.zeros(self.batch_size, dtype=torch.long, device=self.device)
+        mu_avg, logvar_avg, test_index = 0, 1, 0
+        out = False
+        while not out:
+            for batch_idx, (x1, x2) in enumerate(self.data_loader):
+                #model.eval()
+                self.global_iter += 1
+                self.pbar.update(1)
+
+                x1 = x1.to(self.device)
+                x1_rec, mu, logvar, z = gcam.forward(x1)
+                # For Standard FactorVAE loss
+                vae_recon_loss = recon_loss(x1, x1_rec)
+                vae_kld = kl_divergence(mu, logvar)
+                D_z = self.D(z)
+                vae_tc_loss = (D_z[:, :1] - D_z[:, 1:]).mean()
+
+                factorVae_loss = vae_recon_loss + vae_kld + self.gamma*vae_tc_loss
+                # For attention disentanglement loss
+                gcam.backward(mu, logvar, mu_avg, logvar_avg)
+                gcam_maps = gcam.generate()
+
+                print(len(gcam_maps))
+                sel = self.select_attention_maps(gcam_maps)
+                att_loss = attention_disentanglement(sel[0], sel[1])
+                
+                vae_loss = factorVae_loss + att_loss
+                self.optim_VAE.zero_grad()
+                vae_loss.backward(retain_graph=True)
+                self.optim_VAE.step()
+
+                x2 = x2.to(self.device)
+                z_prime = self.VAE(x_2, no_dec=True)
+                z_pperm = permute_dims(z_prime).detach()
+                D_z_pperm = self.D(z_pperm)
+                D_tc_loss = 0.5*(F.cross_entropy(D_z, zeros) + F.cross_entropy(D_z_pperm, ones))
+
+                self.optim_D.zero_grad()
+                D_tc_loss.backward()
+                self.optim_D.step()
+
+
+                if self.global_iter%self.print_iter == 0:
+                    self.pbar.write('[{}] vae_recon_loss:{:.3f} vae_kld:{:.3f} vae_tc_loss:{:.3f} D_tc_loss:{:.3f}'.format(
+                        self.global_iter, vae_recon_loss.item(), vae_kld.item(), vae_tc_loss.item(), D_tc_loss.item()))
+                
+                """
+                ## Visualize and save attention maps  ##
+                x1 = x.repeat(1, 3, 1, 1)
+                for i in range(x1.size(0)):
+                    raw_image = x1[i] * 255.0
+                    ndarr = raw_image.permute(1, 2, 0).cpu().byte().numpy()
+                    im = Image.fromarray(ndarr.astype(np.uint8))
+                    im_path = args.result_dir
+                    if not os.path.exists(im_path):
+                        os.mkdir(im_path)
+                    im.save(os.path.join(im_path,
+                                     "{}-{}-origin.png".format(test_index, str(one_class))))
+
+                    file_path = os.path.join(im_path,
+                                         "{}-{}-attmap.png".format(test_index, str(one_class)))
+                    r_im = np.asarray(im)
+                    save_cam(r_im, file_path, gcam_map[i].squeeze().cpu().data.numpy())
+                    test_index += 1
+                """
                 if self.global_iter >= self.max_iter:
                     out = True
                     break
@@ -484,5 +573,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     solver = Solver(args)
-    solver.train()
-
+    #solver.train()
+    solver.train_disentanglement()

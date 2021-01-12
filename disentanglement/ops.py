@@ -26,3 +26,21 @@ def permute_dims(z):
         perm_z.append(perm_z_j)
 
     return torch.cat(perm_z, 1)
+
+
+def attention_disentanglement(att1, att2):
+    """ 
+        Implementation of the equation 5 
+        ARGS:
+            att1: attention map A1
+            att2: attention map A2
+        Returns:
+            Float value representing the loss
+    """
+    # TODO assert expected shapes and types
+    numer = torch.min(att1,att2).sum()
+    denomi = torch.add(att1,att2).sum()
+
+    return 2 * (numer / denomi)
+    
+    
