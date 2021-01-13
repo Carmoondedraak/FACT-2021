@@ -62,8 +62,10 @@ class Solver(object):
         if args.dataset == 'dsprites':
             self.VAE = FactorVAE1(self.z_dim).to(self.device)
             self.nc = 1
+            """
             for m in self.VAE.named_modules():
                 print(m[0])
+            """
         else:
             self.VAE = FactorVAE2(self.z_dim).to(self.device)
             self.nc = 3
@@ -220,7 +222,7 @@ class Solver(object):
                 gcam.backward(mu, logvar, mu_avg, logvar_avg)
                 gcam_maps = gcam.generate()
 
-                print(len(gcam_maps))
+                #print(len(gcam_maps))
                 sel = self.select_attention_maps(gcam_maps)
                 att_loss = attention_disentanglement(sel[0], sel[1])
                 
@@ -230,7 +232,7 @@ class Solver(object):
                 self.optim_VAE.step()
 
                 x2 = x2.to(self.device)
-                z_prime = self.VAE(x_2, no_dec=True)
+                z_prime = self.VAE(x2, no_dec=True)
                 z_pperm = permute_dims(z_prime).detach()
                 D_z_pperm = self.D(z_pperm)
                 D_tc_loss = 0.5*(F.cross_entropy(D_z, zeros) + F.cross_entropy(D_z_pperm, ones))
