@@ -209,7 +209,12 @@ class SampleAttentionCallback(pl.Callback):
 
 def exp_vae(args):
     att_map_cb = SampleAttentionCallback(batch_size=args.batch_size, every_n_epoch=args.sample_every_n_epoch)
-    trainer = pl.Trainer(gpus=1, callbacks=[att_map_cb])
+    trainer = pl.Trainer(
+        gpus=1 if torch.cuda.is_available() else 0, 
+        callbacks=[att_map_cb], 
+        max_epochs=args.epochs,
+        progress_bar_refresh_rate=1 if args.progress_bar else 0
+    )
 
     if args.dataset == 'mnist':
         dm = OneClassMNISTDataModule(root='./Datasets/MNIST_dataset')
@@ -239,9 +244,11 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
-    # Optimizer Hyperparameters
+    # Optimizer and Training Hyperparameters
     parser.add_argument('--lr', default=1e-3, type=float, help='Learning rate for training')
     parser.add_argument('--batch_size', default=128, type=int, help='Batch size for training')
+    parser.add_argument('--epochs', default=100, type=int, help='Number of epochs to use for training')
+    parser.add_argument('--progress_bar', default=True, type=bool, help='Show or hide progress bar during training')
 
     # Model Hyperparameters
     parser.add_argument('--layer_idx', default=2, type=int, help='Layer number to use for attention map generation')
