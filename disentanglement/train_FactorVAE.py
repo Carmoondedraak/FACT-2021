@@ -51,6 +51,8 @@ class Solver(object):
         self.z_dim = args.z_dim
         self.gamma = args.gamma
 
+        self.lambdaa = args.lambdaa # TODO analyse the effect of this parameter
+
         self.lr_VAE = args.lr_VAE
         self.beta1_VAE = args.beta1_VAE
         self.beta2_VAE = args.beta2_VAE
@@ -226,7 +228,7 @@ class Solver(object):
                 sel = self.select_attention_maps(gcam_maps)
                 att_loss = attention_disentanglement(sel[0], sel[1])
                 
-                vae_loss = factorVae_loss + att_loss
+                vae_loss = factorVae_loss + self.lambdaa*att_loss
                 self.optim_VAE.zero_grad()
                 vae_loss.backward(retain_graph=True)
                 self.optim_VAE.step()
@@ -544,6 +546,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--z_dim', default=10, type=int, help='dimension of the representation z')
     parser.add_argument('--gamma', default=6.4, type=float, help='gamma hyperparameter')
+    parser.add_argument('--lambdaa', default=1.0, type=float, help='attention disentanglement hyperparameter')
     parser.add_argument('--lr_VAE', default=1e-4, type=float, help='learning rate of the VAE')
     parser.add_argument('--beta1_VAE', default=0.9, type=float, help='beta1 parameter of the Adam optimizer for the VAE')
     parser.add_argument('--beta2_VAE', default=0.999, type=float, help='beta2 parameter of the Adam optimizer for the VAE')
