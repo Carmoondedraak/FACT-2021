@@ -211,16 +211,16 @@ def exp_vae(args):
 
     # First pick the correct dataset
     if args.dataset == 'mnist':
-        log_dir = os.path.join('lightning_logs','mnist_logs')
+        log_dir = 'mnist_logs'
         dm = OneClassMNISTDataModule(root='./Datasets/MNIST_dataset')
     elif args.dataset == 'ucsd':
-        log_dir = os.path.join('lightning_logs','ucsd_logs')
+        log_dir = 'ucsd_logs'
         dm = UCSDDataModule(root='./Datasets/UCSD_dataset')
     elif args.dataset == 'mvtec':
-        log_dir = os.path.join('lightning_logs','mvtec_logs')
+        log_dir = 'mvtec_logs'
         raise NotImplementedError
     elif args.dataset == 'dsprites':
-        log_dir = os.path.join('lightning_logs','dsprites_logs')
+        log_dir = 'dsprites_logs'
         raise NotImplementedError
 
     # Make sure dataset is prepared/downloaded
