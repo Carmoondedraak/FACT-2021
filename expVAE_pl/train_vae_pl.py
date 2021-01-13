@@ -208,32 +208,45 @@ class SampleAttentionCallback(pl.Callback):
         self.sample_images(trainer, pl_module, oc=True, mode='attmaps', include_orig=True)
 
 def exp_vae(args):
+
+    # First pick the correct dataset
+    if args.dataset == 'mnist':
+        log_dir = os.path.join('lightning_logs','mnist_logs')
+        dm = OneClassMNISTDataModule(root='./Datasets/MNIST_dataset')
+    elif args.dataset == 'ucsd':
+        log_dir = os.path.join('lightning_logs','ucsd_logs')
+        dm = UCSDDataModule(root='./Datasets/UCSD_dataset')
+    elif args.dataset == 'mvtec':
+        log_dir = os.path.join('lightning_logs','mvtec_logs')
+        raise NotImplementedError
+    elif args.dataset == 'dsprites':
+        log_dir = os.path.join('lightning_logs','dsprites_logs')
+        raise NotImplementedError
+
+    # Make sure dataset is prepared/downloaded
+    dm.prepare_data()
+    dm.setup()
+
+    # Create PyTorch Lightning trainer with callback for sampling
     att_map_cb = SampleAttentionCallback(batch_size=args.batch_size, every_n_epoch=args.sample_every_n_epoch)
     trainer = pl.Trainer(
+        default_root_dir=log_dir,
         gpus=1 if torch.cuda.is_available() else 0, 
         callbacks=[att_map_cb], 
         max_epochs=args.epochs,
         progress_bar_refresh_rate=1 if args.progress_bar else 0
     )
 
-    if args.dataset == 'mnist':
-        dm = OneClassMNISTDataModule(root='./Datasets/MNIST_dataset')
-    elif args.dataset == 'ucsd':
-        dm = UCSDDataModule(root='./Datasets/UCSD_dataset')
-    elif args.dataset == 'mvtec':
-        raise NotImplementedError
-    elif args.dataset == 'dsprites':
-        raise NotImplementedError
-    
-    dm.prepare_data()
-    dm.setup()
+    # Initialize the model
     im_size = dm.dims
     model = ExpVAE(im_size, layer_idx=args.layer_idx)
 
+    # Choosing which inferencing method to use
     if args.inference_mode == 'normal_diff':
         mu, var = calc_latent_mu_var(model.vae, dm, args.batch_size)
         model.set_normal_stats(mu, var)
 
+    # Either train or test
     if args.eval:
         trainer.test(model, dm)
     else:
