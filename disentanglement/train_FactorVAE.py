@@ -199,7 +199,7 @@ class Solver(object):
         #from test_FactorVAE import save_cam
 
         gcam = GradCamDissen(self.VAE, self.D, target_layer='encode.10', cuda=True) # The FactorVAE encoder contains 6 layers
-        self.net_mode(train=True)  # TODO is this correct ?
+        self.net_mode(train=True)
 
         ones = torch.ones(self.batch_size, dtype=torch.long, device=self.device)
         zeros = torch.zeros(self.batch_size, dtype=torch.long, device=self.device)
