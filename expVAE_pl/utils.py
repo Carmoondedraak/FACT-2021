@@ -4,6 +4,7 @@ import cv2
 from urllib import request
 import tarfile
 import torch
+import os
 from torch.utils.data import DataLoader
 
 # Combines input image and attention map into final colormap
@@ -39,3 +40,35 @@ def calc_latent_mu_var(model, dm, batch_size):
     norm_var = torch.cat(norm_var, dim=0).mean(0)
 
     return norm_mu, norm_var
+
+def set_work_directory():
+    abspath = os.path.abspath(__file__)
+    dname = os.path.dirname(abspath)
+    os.chdir(dname)
+
+
+def get_ckpt_path(log_dir, args):
+    if args.model_version is None:
+        raise ValueError("Must provide argument --model_version pointing to existing model to test when using --eval True")
+    
+    version_folder = os.path.join(log_dir, 'lightning_logs', f'version_{args.model_version}')
+
+    if not os.path.exists(version_folder):
+        raise ValueError(f"Must provide a version number that exists, but provided version number has no directory '{version_folder}'")
+    
+    checkpoint_folder = os.path.join(version_folder, 'checkpoints')
+
+    checkpoint_files = os.listdir(checkpoint_folder)
+    checkpoint_filenames = [file for file in checkpoint_files if '.ckpt' in file]
+
+    if len(checkpoint_files) == 0 or len(checkpoint_filenames) == 0:
+        raise ValueError(f"Checkpoints path '{checkpoint_folder}' contains no .ckpt files")
+
+    if len(checkpoint_filenames) > 1:
+        raise ValueError(f"More than one checkpoint found in '{checkpoint_folder}'")
+
+    checkpoint_path = os.path.join(checkpoint_folder, checkpoint_filenames[0])
+
+    hparams_path = [file for file in os.listdir(version_folder) if '.yaml' in file][0]
+
+    return checkpoint_path, os.path.join(version_folder, hparams_path)
