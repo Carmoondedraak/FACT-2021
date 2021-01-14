@@ -93,4 +93,4 @@ def return_data(args):
                               drop_last=True)
 
     data_loader = train_loader
-    return data_loader
+    return data_loader, train_data

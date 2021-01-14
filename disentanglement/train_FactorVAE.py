@@ -13,7 +13,7 @@ import torch.optim as optim
 import torch.nn.functional as F
 from torchvision.utils import make_grid, save_image
 
-from utils import DataGather, mkdirs, grid2gif
+from utils import DataGather, mkdirs, grid2gif, BaseVaeMetric
 from ops import recon_loss, kl_divergence, permute_dims, attention_disentanglement
 from model import FactorVAE1, FactorVAE2, Discriminator
 from dataset import return_data
@@ -45,7 +45,7 @@ class Solver(object):
         self.dset_dir = args.dset_dir
         self.dataset = args.dataset
         self.batch_size = args.batch_size
-        self.data_loader = return_data(args)
+        self.data_loader, self.data = return_data(args)
 
         # Networks & Optimizers
         self.z_dim = args.z_dim
@@ -59,7 +59,7 @@ class Solver(object):
 
         self.lr_D = args.lr_D
         self.beta1_D = args.beta1_D
-        self.beta2_D = args.beta2_D
+                self.beta2_D = args.beta2_D
 
         if args.dataset == 'dsprites':
             self.VAE = FactorVAE1(self.z_dim).to(self.device)
@@ -534,6 +534,66 @@ class Solver(object):
         else:
             if verbose:
                 self.pbar.write("=> no checkpoint found at '{}'".format(filepath))
+
+    def disentanglement_metric(self, ground_truth,
+                                    representation_function
+                                    random_state,
+                                    batch_size,
+                                    num_train,
+                                    num_eval,
+                                    num_variance_estimate):
+        """
+            It is based on "Disentangling by Factorising" paper
+        """
+
+        if args.ckpt_load: # To have the latest saved checkpoints
+            self.load_checkpoint(args.ckpt_load)
+        
+        self.net_mode(self, train=False)
+
+        scores_dict = {}
+
+        global_variances = compute_variances() #TODO
+        active_dims = prume_dimensions() #TODO
+        
+        if not active_dims().any(): # TODO if there is [None]*dims ??
+            scores_dict[] = 0.
+            scores_dict[] = 0.
+            scores_dict[] = 0
+            return scores_dict
+        
+        training_votes = generate_training_batch() # TODO
+        classifier = np.argmax(training_votes, axis=0)
+        other_index = np.arange(training_votes.shape[1])
+
+        training_accuracy = np.sum(training_votes[classifier, other_index]) * 1. / np.sum(training_votes)
+        print("Training set accuracy: %.2g", training_accuracy)
+
+        eval_votes = generate_training_batch() # TODO
+        eval_accuracy = np.sum(eval_votes[classifier,
+                                        other_index]) * 1. / np.sum(eval_votes)
+        print("Evaluation set accuracy: %.2g", eval_accuracy)
+
+        scores_dict["train_accuracy"] = train_accuracy
+        score_dict["eval_accuracy"] = eval_accuracy
+        scores_dict["num_active_dims"] = len(active_dims)
+
+        return scores_dict
+
+    def compute_variances(self):
+        #TODO STARTTTTTTTTTTTTTTTTTTTT HERE
+        # use self.data to get the list of images to randomly assign for the procedure
+        raise NotImplementedError()
+
+
+    def prume_dimensions(self, variances, threshold=0.):
+        """ Verifies the active factors and retrieves their indexes"""
+        raise NotImplementedError()
+ 
+
+    def generate_training_batch(self):
+        #TODO returns a numpy ndarray
+        raise NotImplementedError()
 
 
 if __name__ == "__main__":

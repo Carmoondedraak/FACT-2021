@@ -30,7 +30,7 @@ class Solver(object):
         self.dset_dir = args.dset_dir
         self.dataset = args.dataset
         self.batch_size = args.batch_size
-        self.data_loader = return_data(args)
+        self.data_loader, self.data = return_data(args)
 
         # Networks & Optimizers
         self.z_dim = args.z_dim
