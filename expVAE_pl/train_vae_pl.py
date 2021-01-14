@@ -70,38 +70,40 @@ class ExpVAE(pl.LightningModule):
 
         return loss
 
-    def validation_step(self, batch, batch_idx):
+    def validation_step(self, batch, batch_idx, loader_idx):
         """
         Defines a single validation iteration with the goal of reconstructing the input
         """
         x,  _ = batch
 
-        x_rec, mu, log_var = self.vae(x)
+        if loader_idx == 0:
+            x_rec, mu, log_var = self.vae(x)
 
-        loss = self.loss_f(x_rec, x, mu, log_var)
+            loss = self.loss_f(x_rec, x, mu, log_var)
 
-        self.log('val_loss', loss)
+            self.log('val_loss', loss)
 
-        return loss
+            return loss
+        elif loader_idx == 1:
+            pass
 
-    def test_step(self, batch, batch_idx):
+
+    def test_step(self, batch, batch_idx, loader_idx):
         """
         Defines a single testing iteration with the goal of reconstructing the input
         """
         x,  _ = batch
 
-        x_rec, mu, log_var = self.vae(x)
+        if loader_idx == 0:
+            x_rec, mu, log_var = self.vae(x)
 
-        loss = self.loss_f(x_rec, x, mu, log_var)
+            loss = self.loss_f(x_rec, x, mu, log_var)
 
-        self.log('test_loss', loss)
+            self.log('test_loss', loss)
 
-        # TODO: Doesn't work right now because testing doesn't include grads, but self.forward requires grads
-        # x_rec, M, colormaps = self.forward(x)
-
-        # save_image(make_grid(colormaps.float()), os.path.join(self.logger.log_dir, 'attmaps_test_sample.png'))
-
-        return loss
+            return loss
+        elif loader_idx == 1:
+            pass
 
     def create_colormap(self, x, attmaps):
         """
@@ -187,59 +189,51 @@ class SampleAttentionCallback(pl.Callback):
             self.generate_samples(trainer, pl_module)
         self.epoch += 1
 
-    def sample_images(self, trainer, pl_module, oc=True, mode='attmaps', include_orig=False):
+    def generate_samples(self, trainer, pl_module):
+        """
+        Function invoked by on_train_epoch_end, invoking sample_images to decide which images to save
+        """
+        # Generate reconstructed images to see if model is training
+        self.sample_images(trainer, pl_module, output_type='rec', include_input=True, loader_idx=0)
+        # Generate attentionmaps from "other class" images as well
+        self.sample_images(trainer, pl_module, output_type='attmaps', loader_idx=1)
+
+    def sample_images(self, trainer, pl_module, output_type='attmaps', include_input=False, loader_idx=0):
         """
         Function which either saves attention maps, reconstructed images and saves original images
             trainer - PyTorch Lightning trainer object, through which we access the necessary dataloaders
             pl_module - PyTorch Lightning module used for inference
-            oc - Boolean switch representing "other class". When True, does inference on images which the 
-                model was not trained on
-            mode - Specifies whether we want the generated attention maps or reconstructed images
-                "attmaps" or "rec"
-            inculde_orig - Boolean switch on whether we want to save the original input images as well
+            output_type - Either 'attmaps' or 'rec' for generating the attention maps or reconstructed input images
+            include_input - Boolean switch, which when True, also saves original input images
+            loader_idx - Int, either 0 or 1, which picks which dataloader to use. 0 is the trained class, 1 is the unseen class
         """
+
         # Get dataset name
         dataset_name = pl_module.train_dataloader().dataset.__class__.__name__
 
-        # Get the correct dataset for inference
-        if oc:
-            if 'mnist' in dataset_name.lower():
-                imgs, _ = next(iter(pl_module.val_dataloader()))
-                digit = pl_module.val_dataloader().dataset.digit
-            elif 'ucsd' in dataset_name.lower():
-                imgs, target = next(iter(pl_module.val_dataloader()))
-                digit = 10
-                save_image(make_grid(target), f'{trainer.logger.log_dir}/{self.epoch}-targets.png')
-        else:
-            if 'mnist' in dataset_name.lower():
-                imgs, _ = next(iter(trainer.train_dataloader))
-                digit = trainer.train_dataloader.dataset.digit
-            elif 'ucsd' in dataset_name.lower():
-                imgs, _ = next(iter(trainer.train_dataloader))
-                digit = 10
-
-        # Save attention maps or reconstructed images
-        if mode == 'attmaps':
+        # Save attentionmaps of "other class", which is the second dataloader
+        if output_type == 'attmaps':
+            imgs, target = next(iter(trainer.val_dataloaders[loader_idx]))
             _, _, colormaps = pl_module.forward(imgs)
             colormaps_grid = make_grid(colormaps)
-            save_image(colormaps_grid.float(), f'{trainer.logger.log_dir}/{self.epoch}-{digit}-attmaps.png')
-        elif mode == 'rec':
-            imgs_rec, _, _ = pl_module.forward(imgs)
-            imgs_rec, _ = imgs_rec.detach(), _.detach()
-            imgs_rec_grid = make_grid(imgs_rec)
-            save_image(imgs_rec_grid.float(), f'{trainer.logger.log_dir}/{self.epoch}-{digit}-rec.png')
+            save_image(colormaps_grid.float(), f'{trainer.logger.log_dir}/{self.epoch}-attmaps.png')
 
-        # Save original image if include_orig == True
-        if include_orig:
+            if 'ucsd' in dataset_name:
+                save_image(make_grid(target), f'{trainer.logger.log_dir}/{self.epoch}-targets.png')
+
+        # Save image reconstruction, which is the first dataloader
+        elif output_type == 'rec':
+            imgs, _ = next(iter(trainer.val_dataloaders[loader_idx]))
+            img_rec, _, _ = pl_module.forward(imgs)
+            img_rec = make_grid(img_rec)
+            save_image(img_rec.float(), f'{trainer.logger.log_dir}/{self.epoch}-rec.png')
+        
+        # Also save original input image
+        if include_input:
             imgs_grid = make_grid(imgs)
-            save_image(imgs_grid.float(), f'{trainer.logger.log_dir}/{self.epoch}-{digit}-orig.png')
+            save_image(imgs_grid.float(), f'{trainer.logger.log_dir}/{self.epoch}-input.png')
 
-    def generate_samples(self, trainer, pl_module):
-        # Generate reconstructed images to see if model is training
-        self.sample_images(trainer, pl_module,oc=False, mode='rec')
-        # Generate attentionmaps from "other class" images as well
-        self.sample_images(trainer, pl_module, oc=True, mode='attmaps', include_orig=True)
-
+# Main function which initializes the datasets, models, and preps them for training or evaluation
 def exp_vae(args):
     set_work_directory()
 
@@ -258,16 +252,19 @@ def exp_vae(args):
         raise NotImplementedError
 
 
-    # Create PyTorch Lightning trainer with callback for sampling
+    # Create PyTorch Lightning trainer with callback for sampling, if enabled
     if args.sample_during_training:
         att_map_cb = SampleAttentionCallback(batch_size=args.batch_size, every_n_epoch=args.sample_every_n_epoch)
     else:
-        att_map_cb = None
+        att_map_cb = SampleAttentionCallback(batch_size=args.batch_size, every_n_epoch=1e8)
 
+    # Create checkpoint for saving the model, based on the validation loss
     checkpoint_cb = ModelCheckpoint(
         monitor='val_loss',
         mode='min',
     )
+
+    # Create PyTorch lightning trainer
     trainer = pl.Trainer(
         default_root_dir=log_dir,
         gpus=1 if torch.cuda.is_available() else 0, 
@@ -284,8 +281,8 @@ def exp_vae(args):
 
     # Either train or test
     if args.eval:
+        # In case of evaluation, we load a pretrained model
         model_path, hparams_path = get_ckpt_path(log_dir, args)
-
         model = ExpVAE.load_from_checkpoint(
             checkpoint_path=model_path,
             hparams_file=hparams_path
@@ -295,13 +292,14 @@ def exp_vae(args):
         dm.prepare_data()
         dm.setup('test')
         
+        # Test the model
         trainer.test(model, datamodule=dm)
     else:
         # Make sure dataset is prepared/downloaded
         dm.prepare_data()
         dm.setup()
 
-        # Load pretrained model if it exists
+        # Load pretrained model if one is specified by model_version
         if args.model_version is not None:
             model_path, hparams_path = get_ckpt_path(log_dir, args)
 
@@ -309,11 +307,13 @@ def exp_vae(args):
                 checkpoint_path=model_path,
                 hparams_file=hparams_path
                 )
+
+        # Otherwise, we initialize a new model
         else:
-            # Initialize the model
             im_size = dm.dims
             model = ExpVAE(im_size, layer_idx=args.layer_idx)
 
+        # Train model
         trainer.fit(model, dm)
 
 torch.autograd.set_detect_anomaly(True)
@@ -338,7 +338,7 @@ if __name__ == '__main__':
     # Inference option
     parser.add_argument('--inference_mode', default='mean_sum', type=str, help='Method used for attention map generation')
     parser.add_argument('--sample_during_training', default=True, type=bool, help='Sample images during training?')
-    parser.add_argument('--sample_every_n_epoch', default=5, type=int, help='After how many epochs should we sample')
+    parser.add_argument('--sample_every_n_epoch', default=10, type=int, help='After how many epochs should we sample')
     
     # Train or test?
     parser.add_argument('--eval', default=False, type=bool, help='Train or only test the model')
