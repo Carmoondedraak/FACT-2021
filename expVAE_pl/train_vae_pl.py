@@ -87,8 +87,6 @@ class ExpVAE(pl.LightningModule):
     def test_step(self, batch, batch_idx):
         """
         Defines a single testing iteration with the goal of reconstructing the input
-        TODO: Might have to be adjusted, as currently the test set is defined as the class not trained on,
-        Instead, we might want to generate and save attention maps.
         """
         x,  _ = batch
 
@@ -97,6 +95,11 @@ class ExpVAE(pl.LightningModule):
         loss = self.loss_f(x_rec, x, mu, log_var)
 
         self.log('test_loss', loss)
+
+        # TODO: Doesn't work right now because testing doesn't include grads, but self.forward requires grads
+        # x_rec, M, colormaps = self.forward(x)
+
+        # save_image(make_grid(colormaps.float()), os.path.join(self.logger.log_dir, 'attmaps_test_sample.png'))
 
         return loss
 
@@ -256,7 +259,11 @@ def exp_vae(args):
 
 
     # Create PyTorch Lightning trainer with callback for sampling
-    att_map_cb = SampleAttentionCallback(batch_size=args.batch_size, every_n_epoch=args.sample_every_n_epoch)
+    if args.sample_during_training:
+        att_map_cb = SampleAttentionCallback(batch_size=args.batch_size, every_n_epoch=args.sample_every_n_epoch)
+    else:
+        att_map_cb = None
+
     checkpoint_cb = ModelCheckpoint(
         monitor='val_loss',
         mode='min',
@@ -269,7 +276,6 @@ def exp_vae(args):
         max_epochs=args.epochs,
         progress_bar_refresh_rate=1 if args.progress_bar else 0
     )
-
 
     # Choosing which inferencing method to use
     if args.inference_mode == 'normal_diff':
@@ -297,8 +303,12 @@ def exp_vae(args):
 
         # Load pretrained model if it exists
         if args.model_version is not None:
-            model_path = get_ckpt_path(log_dir, args)
-            model = ExpVAE.load_from_checkpoint(checkpoint_path=model_path)
+            model_path, hparams_path = get_ckpt_path(log_dir, args)
+
+            model = ExpVAE.load_from_checkpoint(
+                checkpoint_path=model_path,
+                hparams_file=hparams_path
+                )
         else:
             # Initialize the model
             im_size = dm.dims
@@ -327,6 +337,7 @@ if __name__ == '__main__':
     
     # Inference option
     parser.add_argument('--inference_mode', default='mean_sum', type=str, help='Method used for attention map generation')
+    parser.add_argument('--sample_during_training', default=True, type=bool, help='Sample images during training?')
     parser.add_argument('--sample_every_n_epoch', default=5, type=int, help='After how many epochs should we sample')
     
     # Train or test?
