@@ -1,4 +1,5 @@
 import pytorch_lightning as pl
+from pytorch_lightning.callbacks import ModelCheckpoint
 import torch
 import torch.nn.functional as F
 import numpy as np
@@ -26,14 +27,13 @@ np.random.seed(init_seed)
 
 class ExpVAE(pl.LightningModule):
     
-    def __init__(self, img_size, lr=1e-3, inference_method='mean_sum', layer_idx=2, z_dim=32):
+    def __init__(self, im_shape, lr=1e-3, inference_mode='mean_sum', layer_idx=2, z_dim=32):
         super().__init__()
-        
-        self.im_shape = img_size
-        self.lr = lr
-        self.vae = VAE(layer_idx, z_dim, self.im_shape)
 
-        self.inference_mode = inference_method
+        self.save_hyperparameters()
+        
+        self.vae = VAE(self.hparams.layer_idx, self.hparams.z_dim, self.hparams.im_shape)
+
 
     def loss_f(self, recon_x, x, mu, logvar):
         """
@@ -70,6 +70,36 @@ class ExpVAE(pl.LightningModule):
 
         return loss
 
+    def validation_step(self, batch, batch_idx):
+        """
+        Defines a single validation iteration with the goal of reconstructing the input
+        """
+        x,  _ = batch
+
+        x_rec, mu, log_var = self.vae(x)
+
+        loss = self.loss_f(x_rec, x, mu, log_var)
+
+        self.log('val_loss', loss)
+
+        return loss
+
+    def test_step(self, batch, batch_idx):
+        """
+        Defines a single testing iteration with the goal of reconstructing the input
+        TODO: Might have to be adjusted, as currently the test set is defined as the class not trained on,
+        Instead, we might want to generate and save attention maps.
+        """
+        x,  _ = batch
+
+        x_rec, mu, log_var = self.vae(x)
+
+        loss = self.loss_f(x_rec, x, mu, log_var)
+
+        self.log('test_loss', loss)
+
+        return loss
+
     def create_colormap(self, x, attmaps):
         """
         Creates and returns a colormap from the attention map and original input image
@@ -102,9 +132,9 @@ class ExpVAE(pl.LightningModule):
         x_rec, mu, log_var = self.vae(x)
         x_rec = torch.sigmoid(x_rec)
         
-        if self.inference_mode == 'mean_sum':
+        if self.hparams.inference_mode == 'mean_sum':
             score = torch.sum(mu)
-        elif self.inference_mode == 'normal_diff':
+        elif self.hparams.inference_mode == 'normal_diff':
             z = self.vae.norm_diff_reparametrize(mu, log_var)
             score = torch.sum(z)
 
@@ -116,7 +146,7 @@ class ExpVAE(pl.LightningModule):
             dz_da = dz_da / (torch.sqrt(torch.mean(torch.square(dz_da))))
             alpha = F.avg_pool2d(dz_da, kernel_size=dz_da.shape[2:])
             M = torch.sum(alpha*A, dim=1)
-            M = F.interpolate(M.unsqueeze(0), size=self.im_shape[1:], mode='bilinear', align_corners=False).permute(1,0,2,3)
+            M = F.interpolate(M.unsqueeze(0), size=self.hparams.im_shape[1:], mode='bilinear', align_corners=False).permute(1,0,2,3)
             M = torch.abs(M)
 
         colormaps = self.create_colormap(x, M)
@@ -124,12 +154,12 @@ class ExpVAE(pl.LightningModule):
         return x_rec, M, colormaps
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr)
         return optimizer
 
     def set_normal_stats(self, mu, log_var):
         self.vae.configure_normal(mu=mu, log_var=log_var)
-        self.inference_mode = 'normal_diff'
+        self.hparams.inference_mode = 'normal_diff'
 
 
 class SampleAttentionCallback(pl.Callback):
@@ -208,38 +238,38 @@ class SampleAttentionCallback(pl.Callback):
         self.sample_images(trainer, pl_module, oc=True, mode='attmaps', include_orig=True)
 
 def exp_vae(args):
+    set_work_directory()
 
     # First pick the correct dataset
-    if args.dataset == 'mnist':
+    if args.dataset.lower() == 'mnist':
         log_dir = 'mnist_logs'
         dm = OneClassMNISTDataModule(root='./Datasets/MNIST_dataset')
-    elif args.dataset == 'ucsd':
+    elif args.dataset.lower() == 'ucsd':
         log_dir = 'ucsd_logs'
         dm = UCSDDataModule(root='./Datasets/UCSD_dataset')
-    elif args.dataset == 'mvtec':
+    elif args.dataset.lower() == 'mvtec':
         log_dir = 'mvtec_logs'
         raise NotImplementedError
-    elif args.dataset == 'dsprites':
+    elif args.dataset.lower() == 'dsprites':
         log_dir = 'dsprites_logs'
         raise NotImplementedError
 
-    # Make sure dataset is prepared/downloaded
-    dm.prepare_data()
-    dm.setup()
 
     # Create PyTorch Lightning trainer with callback for sampling
     att_map_cb = SampleAttentionCallback(batch_size=args.batch_size, every_n_epoch=args.sample_every_n_epoch)
+    checkpoint_cb = ModelCheckpoint(
+        monitor='val_loss',
+        mode='min',
+    )
     trainer = pl.Trainer(
         default_root_dir=log_dir,
         gpus=1 if torch.cuda.is_available() else 0, 
+        checkpoint_callback=checkpoint_cb,
         callbacks=[att_map_cb], 
         max_epochs=args.epochs,
         progress_bar_refresh_rate=1 if args.progress_bar else 0
     )
 
-    # Initialize the model
-    im_size = dm.dims
-    model = ExpVAE(im_size, layer_idx=args.layer_idx)
 
     # Choosing which inferencing method to use
     if args.inference_mode == 'normal_diff':
@@ -248,8 +278,32 @@ def exp_vae(args):
 
     # Either train or test
     if args.eval:
-        trainer.test(model, dm)
+        model_path, hparams_path = get_ckpt_path(log_dir, args)
+
+        model = ExpVAE.load_from_checkpoint(
+            checkpoint_path=model_path,
+            hparams_file=hparams_path
+            )
+
+        # Make sure dataset is prepared/downloaded
+        dm.prepare_data()
+        dm.setup('test')
+        
+        trainer.test(model, datamodule=dm)
     else:
+        # Make sure dataset is prepared/downloaded
+        dm.prepare_data()
+        dm.setup()
+
+        # Load pretrained model if it exists
+        if args.model_version is not None:
+            model_path = get_ckpt_path(log_dir, args)
+            model = ExpVAE.load_from_checkpoint(checkpoint_path=model_path)
+        else:
+            # Initialize the model
+            im_size = dm.dims
+            model = ExpVAE(im_size, layer_idx=args.layer_idx)
+
         trainer.fit(model, dm)
 
 torch.autograd.set_detect_anomaly(True)
@@ -277,6 +331,7 @@ if __name__ == '__main__':
     
     # Train or test?
     parser.add_argument('--eval', default=False, type=bool, help='Train or only test the model')
+    parser.add_argument('--model_version', default=None, type=int, help='Which version of the model to continue training')
     
     args = parser.parse_args()
 
