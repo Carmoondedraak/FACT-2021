@@ -10,16 +10,11 @@ from utils import *
 
 # Extends torchvision MNISt dataset, overwriting the data to only have a single class
 class OneClassMNIST(MNIST):
-    def __init__(self, digit, root, transforms, split=False, train=False, download=False):
-        super(OneClassMNIST, self).__init__(root, download=download)
+    def __init__(self, digit, root, transforms, download=False, train=True):
+        super(OneClassMNIST, self).__init__(root, train=train, download=download)
 
         self.digit = digit
         digit_idxs = torch.nonzero(self.targets == digit).squeeze(1)
-        if split:
-            if train:
-                digit_idxs = digit_idxs[:int(len(digit_idxs)*0.9)]
-            else:
-                digit_idxs = digit_idxs[int(len(digit_idxs)*0.9):]
 
         self.data = self.data[digit_idxs, :,:]
         self.targets = torch.full(digit_idxs.shape, fill_value=digit)
@@ -44,21 +39,27 @@ class OneClassMNISTDataModule(pl.LightningDataModule):
 
     def setup(self, stage=None):
         if stage == 'train' or stage is None:
-            self.train_set = OneClassMNIST(digit=self.train_digit, root=self.data_dir, transforms=self.transform,
-                                            split=True, train=True)
-            self.val_set = OneClassMNIST(digit=self.train_digit, root=self.data_dir, transforms=self.transform,
-                                            split=True, train=False)
+            self.train_set = OneClassMNIST(digit=self.train_digit, root=self.data_dir, transforms=self.transform, train=True)
 
         if stage == 'test' or stage is None:
-            self.test_set = OneClassMNIST(digit=self.train_digit, root=self.data_dir, transforms=self.transform,
-                                            split=False, train=False)
+            self.test_set = OneClassMNIST(digit=self.train_digit, root=self.data_dir, transforms=self.transform, train=False)
+
+        self.eval_set = OneClassMNIST(digit=self.test_digit, root=self.data_dir, transforms=self.transform)
         
-
+    # For training, we return one dataloader, of the class to be trained on
     def train_dataloader(self):
-        return DataLoader(self.train_set, batch_size=self.batch_size, num_workers=self.num_workers)
+        trained_digit_loader = DataLoader(self.train_set, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=True)
+        return trained_digit_loader
 
+    # NOTE: For our purposes, we have no need for a separate validation and test set, so they are the exac same
+    # For validation, we return two dataloaders. One for the class being trained on, and another of the "anomaly" class 
     def val_dataloader(self):
-        return DataLoader(self.val_set, batch_size=self.batch_size, num_workers=self.num_workers)
+        trained_digit_loader = DataLoader(self.test_set, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=True)
+        eval_digit_loader = DataLoader(self.eval_set, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=True)
+        return [trained_digit_loader, eval_digit_loader]
 
+    # For testing, we return two dataloaders. One for the class being trained on, and another of the "anomaly" class 
     def test_dataloader(self):
-        return DataLoader(self.test_set, batch_size=self.batch_size, num_workers=self.num_workers)
+        trained_digit_loader = DataLoader(self.test_set, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=True)
+        eval_digit_loader = DataLoader(self.eval_set, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=True)
+        return [trained_digit_loader, eval_digit_loader]

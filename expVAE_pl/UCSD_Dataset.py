@@ -10,21 +10,23 @@ from utils import download_and_extract
 
 # Custom PyTorch dataset for UCSD pedestrian dataset
 class UCSD(data.Dataset):
-    def __init__(self, path, transforms=None, train=True):
-        self.train = train
+    def __init__(self, path, transforms=None, split_type='train'):
+        self.split_type = split_type
 
 
-        if self.train:
+        if self.split_type == 'train' or self.split_type == 'val':
             self.path = os.path.join(path, 'UCSD_Anomaly_Dataset.v1p2/UCSDped1/Train')
         else:
             self.path = os.path.join(path, 'UCSD_Anomaly_Dataset.v1p2/UCSDped1/Test')
 
-        if self.train:
+        if self.split_type == 'train' or self.split_type == 'val':
             folders = sorted([os.path.join(self.path, folder) for folder in os.listdir(self.path) if 'Train' in folder])
             self.files = sorted([os.path.join(folder, file) for folder in folders for file in os.listdir(folder) if '.tif' in file])
-        else:
-            # folders = sorted([os.path.join(self.path, folder) for folder in os.listdir(self.path) if 'Test' in folder and '_gt' not in folder])
-            # self.files = sorted([os.path.join(folder, file) for folder in folders for file in os.listdir(folder) if '.tif' in file])
+            if self.split_type == 'train':
+                self.files = self.files[:int(0.9*len(self.files))]
+            elif self.split_type == 'val':
+                self.files = self.files[int(0.9*len(self.files)):]
+        elif self.split_type == 'test':
             target_folders = sorted([os.path.join(self.path, folder) for folder in os.listdir(self.path) if 'Test' in folder and '_gt' in folder])
             folders = [folder.rstrip('_gt') for folder in target_folders]
             self.target_files = sorted([os.path.join(folder, file) for folder in target_folders for file in os.listdir(folder) if '.bmp' in file])
@@ -36,13 +38,13 @@ class UCSD(data.Dataset):
     def __getitem__(self, i):
         file_name = self.files[i]
         img = Image.open(file_name)
-        if self.train:
-            img = self.transforms(img)
-            return img, torch.tensor(0)
-        else:
+        if self.split_type == 'test':
             img = self.target_transforms(img)
             target_img = self.target_transforms(Image.open(self.target_files[i]))
             return img, target_img
+        else:
+            img = self.transforms(img)
+            return img, torch.tensor(0)
 
     def __len__(self):
         return len(self.files)
@@ -64,15 +66,24 @@ class UCSDDataModule(pl.LightningDataModule):
             download_and_extract(self.url, self.data_dir)
 
     def setup(self):
-        self.train_set = UCSD(path=self.data_dir, transforms=self.transform, train=True)
-        self.test_set = UCSD(path=self.data_dir, transforms=self.transform, train=False)
+        self.train_set = UCSD(path=self.data_dir, transforms=self.transform, split_type='train')
+        self.val_set = UCSD(path=self.data_dir, transforms=self.transform, split_type='val')
+        self.eval_set = UCSD(path=self.data_dir, transforms=self.transform, split_type='test')
 
+    # For training, we return one dataloader, of the class to be trained on
     def train_dataloader(self):
         return DataLoader(self.train_set, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=True)
 
+    # NOTE: For our purposes, we have no need for a separate validation and test set, so they are the exac same
+    # For validation, we return two dataloaders. One for the class being trained on, and another of the "anomaly" class 
     def val_dataloader(self):
-        return DataLoader(self.test_set, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=True)
+        trained_digit_loader = DataLoader(self.val_set, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=True)
+        eval_digit_loader = DataLoader(self.eval_set, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=True)
+        return [trained_digit_loader, eval_digit_loader]
 
+    # For testing, we return two dataloaders. One for the class being trained on, and another of the "anomaly" class 
     def test_dataloader(self):
-        return DataLoader(self.test_set, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=True)
+        trained_digit_loader = DataLoader(self.val_set, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=True)
+        eval_digit_loader = DataLoader(self.eval_set, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=True)
+        return [trained_digit_loader, eval_digit_loader]
 
