@@ -217,6 +217,7 @@ class SampleAttentionCallback(pl.Callback):
             _, _, colormaps = pl_module.forward(imgs)
             colormaps_grid = make_grid(colormaps)
             save_image(colormaps_grid.float(), f'{trainer.logger.log_dir}/{self.epoch}-attmaps.png')
+            trainer.logger.experiment.add_image('attmaps', colormaps_grid.cpu().numpy())
 
             if 'ucsd' in dataset_name:
                 save_image(make_grid(target), f'{trainer.logger.log_dir}/{self.epoch}-targets.png')
@@ -227,6 +228,7 @@ class SampleAttentionCallback(pl.Callback):
             img_rec, _, _ = pl_module.forward(imgs)
             img_rec = make_grid(img_rec)
             save_image(img_rec.float(), f'{trainer.logger.log_dir}/{self.epoch}-rec.png')
+            trainer.logger.experiment.add_image('rec_images', img_rec.cpu().numpy())
         
         # Also save original input image
         if include_input:
