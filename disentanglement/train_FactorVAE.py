@@ -59,7 +59,7 @@ class Solver(object):
 
         self.lr_D = args.lr_D
         self.beta1_D = args.beta1_D
-                self.beta2_D = args.beta2_D
+        self.beta2_D = args.beta2_D
 
         if args.dataset == 'dsprites':
             self.VAE = FactorVAE1(self.z_dim).to(self.device)
@@ -148,9 +148,9 @@ class Solver(object):
                     self.pbar.write('[{}] vae_recon_loss:{:.3f} vae_kld:{:.3f} vae_tc_loss:{:.3f} D_tc_loss:{:.3f}'.format(
                         self.global_iter, vae_recon_loss.item(), vae_kld.item(), vae_tc_loss.item(), D_tc_loss.item()))
 
-                """
                 if self.global_iter%self.ckpt_save_iter == 0:
                     self.save_checkpoint(self.global_iter)
+                """
 
                 if self.viz_on and (self.global_iter%self.viz_ll_iter == 0):
                     soft_D_z = F.softmax(D_z, 1)[:, :1].detach()
@@ -248,6 +248,8 @@ class Solver(object):
                     self.pbar.write('[{}] vae_recon_loss:{:.3f} vae_kld:{:.3f} vae_tc_loss:{:.3f} D_tc_loss:{:.3f}'.format(
                         self.global_iter, vae_recon_loss.item(), vae_kld.item(), vae_tc_loss.item(), D_tc_loss.item()))
                 
+                if self.global_iter%self.ckpt_save_iter == 0:
+                    self.save_checkpoint(self.global_iter)
                 """
                 ## Visualize and save attention maps  ##
                 x1 = x.repeat(1, 3, 1, 1)
@@ -535,54 +537,120 @@ class Solver(object):
             if verbose:
                 self.pbar.write("=> no checkpoint found at '{}'".format(filepath))
 
-    def disentanglement_metric(self, ground_truth,
-                                    representation_function
-                                    random_state,
-                                    batch_size,
-                                    num_train,
-                                    num_eval,
-                                    num_variance_estimate):
+    def disentanglement_metric(self):
         """
             It is based on "Disentangling by Factorising" paper
         """
-
         if args.ckpt_load: # To have the latest saved checkpoints
             self.load_checkpoint(args.ckpt_load)
         
-        self.net_mode(self, train=False)
+        self.net_mode(train=False)
 
-        scores_dict = {}
+        root = os.path.join(self.dset_dir, 'dsprites-dataset/dsprites_ndarray_co1sh3sc6or40x32y32_64x64.npz')
+        data = np.load(root, encoding='latin1')
+        factors = torch.from_numpy(data['latents_classes'])
+        factors = factors[:, 1:] # Removing the color since its always white
+        num_classes = [3,6,40,32,32] # the number of latent value factors
+        print("The factors are ", type(factors), factors.shape, "with classes", len(num_classes))
+        num_factors = len(num_classes)
 
-        global_variances = compute_variances() #TODO
-        active_dims = prume_dimensions() #TODO
+        num_examples_per_vote = 100
+        num_votes = 800
+        num_votes_per_factor = num_votes// num_factors
+    
+        try:
+
+            all_mus = []
+            all_logvars = []
+            code_list = []
+            for fixed_k in range(num_factors):
+                code_list_per_factor = []
+                for _ in range(num_votes_per_factor):
+                    fixed_value = np.random.choice(num_classes[fixed_k]) 
+                    useful_samples_idx = np.where(factors[:, fixed_k] == fixed_value)[0]
+                    #print("The number of useful samples are", len(useful_samples_idx))
+                    random_idx = np.random.choice(useful_samples_idx, num_examples_per_vote)
+                    sample_imgs = self.data[random_idx]
+                    #print("The num of sampled images is with shape", sample_imgs[0].shape)
+                    # Get the models's predicitions
+                    _, mus, logvars, _ = self.VAE(sample_imgs[0].to(self.device))
+                    mus = mus.detach().to(torch.device("cpu")).numpy()
+                    logvars = logvars.detach().to(torch.device("cpu")).numpy()
+                    #print(type(mus), type(logvars))
+                    all_mus.append(mus)
+                    all_logvars.append(logvars)
+                    code_list_per_factor.append((mus, logvars))
+                    del sample_imgs
+                code_list.append(code_list_per_factor)
+
+        except RuntimeError as e:
+            if 'out of memory' in str(e):
+                print('| Warning: ran out of memory')
+                for p in self.VAE.parameters():
+                    if p.grad is not None:
+                        del p.grad
+                torch.cuda.empty_cache()
+                exit(0)
+            else:
+                raise e
         
-        if not active_dims().any(): # TODO if there is [None]*dims ??
-            scores_dict[] = 0.
-            scores_dict[] = 0.
-            scores_dict[] = 0
-            return scores_dict
+        all_mus = np.concatenate(all_mus, axis=0)
+        all_logvars = np.concatenate(all_logvars, axis=0)
         
-        training_votes = generate_training_batch() # TODO
-        classifier = np.argmax(training_votes, axis=0)
-        other_index = np.arange(training_votes.shape[1])
+        mean_kl = self.compute_kl_divergence_mean(all_mus, all_logvars)
+        # Discard the dimensions that collapsed to the prior
+        kl_tol = 1e-2
+        useful_dims = np.where(mean_kl > kl_tol)[0]
 
-        training_accuracy = np.sum(training_votes[classifier, other_index]) * 1. / np.sum(training_votes)
-        print("Training set accuracy: %.2g", training_accuracy)
+        # Compute scales for useful dims
+        scales = np.std(all_mus[:, useful_dims], axis=0)
 
-        eval_votes = generate_training_batch() # TODO
-        eval_accuracy = np.sum(eval_votes[classifier,
-                                        other_index]) * 1. / np.sum(eval_votes)
-        print("Evaluation set accuracy: %.2g", eval_accuracy)
+        print("The empirical mean for kl dimensions-wise:")
+        print(np.reshape(mean_kl, newshape=(-1,1)))
+        print("Useful dimensions:", useful_dims, " - Total:", useful_dims.shape[0])
+        print("Empirical Scales:", scales)
 
-        scores_dict["train_accuracy"] = train_accuracy
-        score_dict["eval_accuracy"] = eval_accuracy
-        scores_dict["num_active_dims"] = len(active_dims)
+        # For the classifier
+        d_values = []
+        k_values = []
+        for fixed_k in range(num_factors):
+            #Generate training examples for this factor
+            for i in range(num_votes_per_factor):
+                codes = code_list[fixed_k][i][0]
+                codes = codes[:, useful_dims]
+                norm_codes = codes / scales
+                variance = np.var(norm_codes, axis=0)
+                d_min_var = np.argmin(variance)
+                d_values.append(d_min_var)
+                k_values.append(fixed_k)
 
-        return scores_dict
+        d_values = np.array(d_values)
+        k_values = np.array(k_values)
+
+        v_matrix = np.zeros((useful_dims.shape[0], num_factors))
+        for j in range(useful_dims.shape[0]):
+            for k in range(num_factors):
+                v_matrix[j, k] = np.sum((d_values == j) & (k_values == k))
+
+        print("Votes:\n", v_matrix)
+
+        # Majority vote is C_j argmax_k V_jk
+        classifier = np.argmax(v_matrix, axis=1)
+        predicted_k = classifier[d_values]
+        accuracy = np.sum(predicted_k == k_values) / num_votes
+
+        print("The accuracy is", accuracy)
+        return accuracy
+
+    def compute_kl_divergence_mean(self, all_mus, all_logvar):
+        """ It computes the KL divergence per dimension wrt the prior """
+        variance = np.exp(all_mus, all_logvar)
+        squared_mean = np.square(all_mus)
+        all_kl = 0.5 * (variance - all_logvar + squared_mean - 1)
+        mean_kl = np.mean(all_kl, axis=0)
+        return mean_kl
 
     def compute_variances(self):
-        #TODO STARTTTTTTTTTTTTTTTTTTTT HERE
-        # use self.data to get the list of images to randomly assign for the procedure
         raise NotImplementedError()
 
 
@@ -592,7 +660,6 @@ class Solver(object):
  
 
     def generate_training_batch(self):
-        #TODO returns a numpy ndarray
         raise NotImplementedError()
 
 
@@ -639,4 +706,5 @@ if __name__ == "__main__":
 
     solver = Solver(args)
     #solver.train()
-    solver.train_disentanglement()
+    #solver.train_disentanglement()
+    solver.disentanglement_metric()
