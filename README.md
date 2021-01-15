@@ -2,7 +2,8 @@
 
 
 ## TODOs Disentanglement
-- [ ] Structure base class and subclasses for the Vanila Solver and Author's adaptation
+- [x] Structure base class and subclasses for the Vanila Solver and Author's adaptation
+- [ ] \[If there's time\] run the experiments with multiple random seeds (other than 1)
 
 ## References for Attention Disentanglement Replication
 * The baseline codebase for this project is provided by the authors at [1] (https://github.com/liuem607/expVAE)
