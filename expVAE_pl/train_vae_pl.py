@@ -209,7 +209,7 @@ class SampleAttentionCallback(pl.Callback):
         """
 
         # Get dataset name
-        dataset_name = pl_module.train_dataloader().dataset.__class__.__name__
+        dataset_name = pl_module.train_dataloader().dataset.__class__.__name__.lower()
 
         # Save attentionmaps of "other class", which is the second dataloader
         if output_type == 'attmaps':
@@ -218,7 +218,7 @@ class SampleAttentionCallback(pl.Callback):
             colormaps = colormaps.detach().cpu()
             colormaps_grid = make_grid(colormaps)
             save_image(colormaps_grid.float(), f'{trainer.logger.log_dir}/{self.epoch}-attmaps.png')
-            trainer.logger.experiment.add_image('attmaps', colormaps_grid.numpy())
+            trainer.logger.experiment.add_image('attmaps', colormaps_grid.numpy(), self.epoch)
 
             if 'ucsd' in dataset_name:
                 save_image(make_grid(target), f'{trainer.logger.log_dir}/{self.epoch}-targets.png')
@@ -230,7 +230,7 @@ class SampleAttentionCallback(pl.Callback):
             img_rec = img_rec.detach().cpu()
             img_rec = make_grid(img_rec)
             save_image(img_rec.float(), f'{trainer.logger.log_dir}/{self.epoch}-rec.png')
-            trainer.logger.experiment.add_image('rec_images', img_rec.numpy())
+            trainer.logger.experiment.add_image('rec_images', img_rec.numpy(), self.epoch)
         
         # Also save original input image
         if include_input:
