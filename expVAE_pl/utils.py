@@ -23,8 +23,10 @@ def get_cam(image, gcam):
 # Helper function to download and extract files given a url to a specified path
 # Used by UCSD_Dataset.py to download and extract the dataset
 def download_and_extract(url, path):
+    print('Downloading datasets...')
     ftpstream = request.urlopen(url)
     thetarfile = tarfile.open(fileobj=ftpstream, mode="r|gz")
+    print('Extracting datasets...')
     thetarfile.extractall(path)
 
 # TODO: Second inference method
