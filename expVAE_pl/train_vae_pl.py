@@ -10,8 +10,7 @@ from PIL import Image
 from utils import *
 from MNIST_Dataset import OneClassMNISTDataModule
 from UCSD_Dataset import UCSDDataModule
-from UCSD_Dataset import UCSD
-from torch.utils.data import DataLoader
+from MVTEC_Dataset import MVTECDataModule
 from vae_model import VAE
 from torchvision.utils import make_grid, save_image
 from torchvision.datasets import MNIST
@@ -250,7 +249,8 @@ def exp_vae(args):
         dm = UCSDDataModule(root='./Datasets/UCSD_dataset')
     elif args.dataset.lower() == 'mvtec':
         log_dir = 'mvtec_logs'
-        raise NotImplementedError
+        dm = MVTECDataModule(root='./Datasets/MVTEC_dataset')
+        # raise NotImplementedError
     elif args.dataset.lower() == 'dsprites':
         log_dir = 'dsprites_logs'
         raise NotImplementedError
