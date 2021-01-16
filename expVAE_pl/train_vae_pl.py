@@ -15,6 +15,7 @@ from vae_model import VAE
 from torchvision.utils import make_grid, save_image
 from torchvision.datasets import MNIST
 from torchvision import transforms
+from pytorch_lightning.metrics.functional.classification import roc, auc
 
 torch.backends.cudnn.enabled = True
 torch.backends.cudnn.benchmark = True
@@ -45,7 +46,6 @@ class ExpVAE(pl.LightningModule):
         batch_size = x.shape[0]
 
         # Reconstruction loss using BCE
-        # L_rec = F.binary_cross_entropy_with_logits(recon_x, x, reduction='none').mean()
         L_rec = F.binary_cross_entropy_with_logits(recon_x, x, reduction='sum')
 
         # KL divergence between encoder and unit Gaussian
@@ -75,6 +75,8 @@ class ExpVAE(pl.LightningModule):
         """
         x,  _ = batch
 
+        # First dataloader contains images of the class we're training on, so we compute
+        # regular VAE loss
         if loader_idx == 0:
             x_rec, mu, log_var = self.vae(x)
 
@@ -84,7 +86,18 @@ class ExpVAE(pl.LightningModule):
 
             return loss
         elif loader_idx == 1:
-            pass
+            _, ground_truth = batch
+
+            # For MNIST, there are no ground truth masks, so we don't compute them
+            if x.shape == ground_truth.shape:
+                _, attmaps, _, bloc_maps = self.forward(x)
+
+                fpr, tpr, thresholds = roc(attmaps, ground_truth, pos_label=1)
+                auroc = auc(fpr, tpr)
+
+                self.log('auroc', auroc, prog_bar=True)
+
+                return auroc
 
 
     def test_step(self, batch, batch_idx, loader_idx):
@@ -102,7 +115,62 @@ class ExpVAE(pl.LightningModule):
 
             return loss
         elif loader_idx == 1:
-            pass
+            _, ground_truth = batch
+            
+            # For MNIST, there are no ground truth masks, so we don't compute them
+            if x.shape == ground_truth.shape:
+                _, attmaps, _, bloc_maps = self.forward(x)
+
+                fpr, tpr, thresholds = roc(attmaps, ground_truth, pos_label=1)
+                auroc = auc(fpr, tpr)
+
+                self.log('auroc', auroc, prog_bar=True)
+
+                return auroc
+
+    def forward(self, x, threshold=None):
+        """
+        Forward function which reconstructs input, and also returns attention, color and binary localization maps
+        Note that this function is not used during training, only for evaluation
+        """
+        self.eval()
+        x = x.to(self.device)
+        x_rec, mu, log_var = self.vae(x)
+        x_rec = torch.sigmoid(x_rec)
+        
+        if self.hparams.inference_mode == 'mean_sum':
+            score = torch.sum(mu)
+        elif self.hparams.inference_mode == 'normal_diff':
+            z = self.vae.norm_diff_reparametrize(mu, log_var)
+            score = torch.sum(z)
+
+        self.zero_grad()
+        if score.requires_grad == False:
+            score.requires_grad = True
+        score.backward(retain_graph=True)
+        dz_da, A = self.vae.get_layer_data()
+        
+        with torch.no_grad():
+            dz_da = dz_da / (torch.sqrt(torch.mean(torch.square(dz_da))))
+            alpha = F.avg_pool2d(dz_da, kernel_size=dz_da.shape[2:])
+            M = torch.sum(alpha*A, dim=1)
+            M = F.interpolate(M.unsqueeze(0), size=self.hparams.im_shape[1:], mode='bilinear', align_corners=False).permute(1,0,2,3)
+            M = torch.abs(M)
+
+        colormaps = self.create_colormap(x, M)
+        if threshold == None:
+            threshold = M.float().mean() + M.std()
+        bloc_map = self.gen_bloc_map(M, threshold)
+
+        return x_rec, M, colormaps, bloc_map
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr)
+        return optimizer
+
+    def set_normal_stats(self, mu, log_var):
+        self.vae.configure_normal(mu=mu, log_var=log_var)
+        self.hparams.inference_mode = 'normal_diff'
 
     def create_colormap(self, x, attmaps):
         """
@@ -126,44 +194,9 @@ class ExpVAE(pl.LightningModule):
         colormaps = colormaps[:, permute]
         return colormaps
 
-    def forward(self, x):
-        """
-        Forward function which reconstructs input, and also returns attention and colormaps
-        Note that this function is not used during training, only for evaluation
-        """
-        self.eval()
-        x = x.to(self.device)
-        x_rec, mu, log_var = self.vae(x)
-        x_rec = torch.sigmoid(x_rec)
-        
-        if self.hparams.inference_mode == 'mean_sum':
-            score = torch.sum(mu)
-        elif self.hparams.inference_mode == 'normal_diff':
-            z = self.vae.norm_diff_reparametrize(mu, log_var)
-            score = torch.sum(z)
-
-        self.zero_grad()
-        score.backward(retain_graph=True)
-        dz_da, A = self.vae.get_layer_data()
-        
-        with torch.no_grad():
-            dz_da = dz_da / (torch.sqrt(torch.mean(torch.square(dz_da))))
-            alpha = F.avg_pool2d(dz_da, kernel_size=dz_da.shape[2:])
-            M = torch.sum(alpha*A, dim=1)
-            M = F.interpolate(M.unsqueeze(0), size=self.hparams.im_shape[1:], mode='bilinear', align_corners=False).permute(1,0,2,3)
-            M = torch.abs(M)
-
-        colormaps = self.create_colormap(x, M)
-
-        return x_rec, M, colormaps
-
-    def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr)
-        return optimizer
-
-    def set_normal_stats(self, mu, log_var):
-        self.vae.configure_normal(mu=mu, log_var=log_var)
-        self.hparams.inference_mode = 'normal_diff'
+    def gen_bloc_map(self, M, threshold):
+        M = (M > threshold).to(torch.int)
+        return M
 
 
 class SampleAttentionCallback(pl.Callback):
@@ -212,20 +245,30 @@ class SampleAttentionCallback(pl.Callback):
 
         # Save attentionmaps of "other class", which is the second dataloader
         if output_type == 'attmaps':
-            imgs, target = next(iter(trainer.val_dataloaders[loader_idx]))
-            _, _, colormaps = pl_module.forward(imgs)
+            imgs, targets = next(iter(trainer.val_dataloaders[loader_idx]))
+            _, _, colormaps, blocmaps = pl_module.forward(imgs)
             colormaps = colormaps.detach().cpu()
             colormaps_grid = make_grid(colormaps)
             save_image(colormaps_grid.float(), f'{trainer.logger.log_dir}/{self.epoch}-attmaps.png')
             trainer.logger.experiment.add_image('attmaps', colormaps_grid.numpy(), self.epoch)
 
+            # For UCSD and MVTEC, show target masks
+            if 'ucsd' in dataset_name or 'mvtec' in dataset_name:
+                targets = make_grid(targets)
+                save_image(targets.float(), f'{trainer.logger.log_dir}/{self.epoch}-targets.png')
+                trainer.logger.experiment.add_image('targets', targets.numpy(), self.epoch)
+
+            # Save binary localization maps for UCSD datset
             if 'ucsd' in dataset_name:
-                save_image(make_grid(target), f'{trainer.logger.log_dir}/{self.epoch}-targets.png')
+                blocmaps = make_grid(blocmaps.detach().cpu())
+                save_image(blocmaps.float(), f'{trainer.logger.log_dir}/{self.epoch}-blocmap.png')
+                trainer.logger.experiment.add_image('blocmaps', blocmaps.numpy(), self.epoch)
+
 
         # Save image reconstruction, which is the first dataloader
         elif output_type == 'rec':
             imgs, _ = next(iter(trainer.val_dataloaders[loader_idx]))
-            img_rec, _, _ = pl_module.forward(imgs)
+            img_rec, _, _, _ = pl_module.forward(imgs)
             img_rec = img_rec.detach().cpu()
             img_rec = make_grid(img_rec)
             save_image(img_rec.float(), f'{trainer.logger.log_dir}/{self.epoch}-rec.png')
@@ -250,11 +293,9 @@ def exp_vae(args):
     elif args.dataset.lower() == 'mvtec':
         log_dir = 'mvtec_logs'
         dm = MVTECDataModule(root='./Datasets/MVTEC_dataset')
-        # raise NotImplementedError
     elif args.dataset.lower() == 'dsprites':
         log_dir = 'dsprites_logs'
         raise NotImplementedError
-
 
     # Create PyTorch Lightning trainer with callback for sampling, if enabled
     if args.sample_during_training:
@@ -263,8 +304,9 @@ def exp_vae(args):
         att_map_cb = SampleAttentionCallback(batch_size=args.batch_size, every_n_epoch=1e8)
 
     # Create checkpoint for saving the model, based on the validation loss
+    monitor = 'val_loss' if args.dataset.lower() == 'mnist' else 'val_loss/dataloader_idx_0'
     checkpoint_cb = ModelCheckpoint(
-        monitor='val_loss',
+        monitor=monitor,
         mode='min',
     )
 
@@ -278,10 +320,9 @@ def exp_vae(args):
         progress_bar_refresh_rate=1 if args.progress_bar else 0
     )
 
-    # Choosing which inferencing method to use
-    if args.inference_mode == 'normal_diff':
-        mu, var = calc_latent_mu_var(model.vae, dm, args.batch_size)
-        model.set_normal_stats(mu, var)
+    # Make sure dataset is prepared/downloaded
+    dm.prepare_data()
+    dm.setup()
 
     # Either train or test
     if args.eval:
@@ -292,16 +333,14 @@ def exp_vae(args):
             hparams_file=hparams_path
             )
 
-        # Make sure dataset is prepared/downloaded
-        dm.prepare_data()
-        dm.setup('test')
-        
+        # Choosing which inferencing method to use
+        if args.inference_mode == 'normal_diff':
+            mu, var = calc_latent_mu_var(model.vae, dm, args.batch_size)
+            model.set_normal_stats(mu, var)
+
         # Test the model
         trainer.test(model, datamodule=dm)
     else:
-        # Make sure dataset is prepared/downloaded
-        dm.prepare_data()
-        dm.setup()
 
         # Load pretrained model if one is specified by model_version
         if args.model_version is not None:
@@ -316,6 +355,11 @@ def exp_vae(args):
         else:
             im_size = dm.dims
             model = ExpVAE(im_size, layer_idx=args.layer_idx)
+
+        # Choosing which inferencing method to use
+        if args.inference_mode == 'normal_diff':
+            mu, var = calc_latent_mu_var(model.vae, dm, args.batch_size)
+            model.set_normal_stats(mu, var)
 
         # Train model
         trainer.fit(model, dm)

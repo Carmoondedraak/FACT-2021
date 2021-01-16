@@ -3,14 +3,23 @@ import torch
 import torch.utils.data as data
 import torchvision.transforms as trforms
 from torch.utils.data import DataLoader
+from torchvision.transforms import functional as F
 import os
 import numpy as np
 from PIL import Image
 from utils import download_and_extract
 
+class ToTensor(object):
+    def __call__(self, image):
+        img = F.to_tensor(image)
+        img[img >= 0.5] = 1
+        img[img < 0.5] = 0
+        diff = (100*100) - ((img == 0).sum() + (img == 1).sum())
+        return img.to(torch.int)
+
 # Custom PyTorch dataset for UCSD pedestrian dataset
 class UCSD(data.Dataset):
-    def __init__(self, path, transforms=None, split_type='train'):
+    def __init__(self, path, transforms=None, target_transforms=None, split_type='train'):
         self.split_type = split_type
 
 
@@ -33,13 +42,13 @@ class UCSD(data.Dataset):
             self.files = sorted([os.path.join(folder, file) for folder in folders for file in os.listdir(folder) if '.tif' in file])
 
         self.transforms = transforms
-        self.target_transforms = transforms
+        self.target_transforms = target_transforms
 
     def __getitem__(self, i):
         file_name = self.files[i]
         img = Image.open(file_name)
         if self.split_type == 'test':
-            img = self.target_transforms(img)
+            img = self.transforms(img)
             target_img = self.target_transforms(Image.open(self.target_files[i]))
             return img, target_img
         else:
@@ -59,6 +68,11 @@ class UCSDDataModule(pl.LightningDataModule):
             trforms.ToTensor(),
         ])
 
+        self.target_transform = trforms.Compose([
+            trforms.Resize(self.dims[1:]),
+            ToTensor()
+        ])
+
         self.url = 'http://www.svcl.ucsd.edu/projects/anomaly/UCSD_Anomaly_Dataset.tar.gz'
 
     def prepare_data(self):
@@ -66,9 +80,9 @@ class UCSDDataModule(pl.LightningDataModule):
             download_and_extract(self.url, self.data_dir)
 
     def setup(self):
-        self.train_set = UCSD(path=self.data_dir, transforms=self.transform, split_type='train')
-        self.val_set = UCSD(path=self.data_dir, transforms=self.transform, split_type='val')
-        self.eval_set = UCSD(path=self.data_dir, transforms=self.transform, split_type='test')
+        self.train_set = UCSD(path=self.data_dir, transforms=self.transform, target_transforms=self.target_transform, split_type='train')
+        self.val_set = UCSD(path=self.data_dir, transforms=self.transform, target_transforms=self.target_transform, split_type='val')
+        self.eval_set = UCSD(path=self.data_dir, transforms=self.transform, target_transforms=self.target_transform, split_type='test')
 
     # For training, we return one dataloader, of the class to be trained on
     def train_dataloader(self):
