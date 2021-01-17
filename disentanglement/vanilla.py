@@ -139,7 +139,7 @@ class Solver(BaseFactorVae):
                         self.global_iter, vae_recon_loss.item(), vae_kld.item(), vae_tc_loss.item(), D_tc_loss.item()))
 
                 if self.global_iter%self.ckpt_save_iter == 0:
-                    self.save_checkpoint(self.global_iter)
+                    self.save_checkpoint(str(self.global_iter)+".pth")
 
                 if self.viz_on and (self.global_iter%self.viz_ll_iter == 0):
                     soft_D_z = F.softmax(D_z, 1)[:, :1].detach()

@@ -6,3 +6,4 @@ disentanglement/data/*
 disentanglement/checkpoints/*
 disentanglement/outputs/*
 disentanglement/logging.log
+disentanglement/experiments/*

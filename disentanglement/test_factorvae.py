@@ -1,15 +1,16 @@
-"""solver.py"""
+import argparse
+import torch
 
 import os
-import visdom
-from tqdm import tqdm
-
-import argparse
 import numpy as np
-from utils import str2bool 
+
+from tqdm import tqdm
+import visdom
+from matplotlib import pyplot as plt
+
+from utils import str2bool
 import time
 
-import torch
 import torch.optim as optim
 import torch.nn.functional as F
 from torchvision.utils import make_grid, save_image
@@ -22,17 +23,32 @@ from dataset import return_data
 import json
 from gradcam import GradCamDissen
 
-# To achieve reproducible results with sequential runs
-torch.backends.cudnn.enabled = True
-torch.backends.cudnn.benchmark = True
-
-init_seed = 1
-torch.manual_seed(init_seed)
-torch.cuda.manual_seed(init_seed)
-np.random.seed(init_seed)
+import re
+from pathlib import Path
 
 
-class Solver(BaseFactorVae):
+cuda = torch.cuda.is_available()
+if cuda:
+    print('cuda available')
+
+device = torch.device("cuda" if cuda else "cpu")
+
+### Save attention maps  ###
+def save_cam(image, filename, gcam):
+    gcam = gcam - np.min(gcam)
+    gcam = gcam / np.max(gcam)
+    h, w, d = image.shape
+    gcam = cv2.resize(gcam, (w, h))
+    gcam = cv2.applyColorMap(np.uint8(255 * gcam), cv2.COLORMAP_JET)
+    gcam = np.asarray(gcam, dtype=np.float) + \
+        np.asarray(image, dtype=np.float)
+    gcam = 255 * gcam / np.max(gcam)
+    gcam = np.uint8(gcam)
+    cv2.imwrite(filename, gcam)
+
+### Define the FactorVAE disentanglement metric tester
+
+class Tester(BaseFactorVae):
     def __init__(self, args):
         # Misc
         use_cuda = args.cuda and torch.cuda.is_available()
@@ -53,7 +69,7 @@ class Solver(BaseFactorVae):
         self.z_dim = args.z_dim
         self.gamma = args.gamma
 
-        self.lambdaa = args.lambdaa # TODO analyse the effect of this parameter
+        self.lambdaa = args.lambdaa
 
         self.lr_VAE = args.lr_VAE
         self.beta1_VAE = args.beta1_VAE
@@ -83,6 +99,7 @@ class Solver(BaseFactorVae):
         self.nets = [self.VAE, self.D]
         
         # Visdom
+        """
         self.viz_on = args.viz_on
         self.win_id = dict(D_z='win_D_z', recon='win_recon', kld='win_kld', acc='win_acc')
         self.line_gather = DataGather('iter', 'soft_D_z', 'soft_D_z_pperm', 'recon', 'kld', 'acc')
@@ -96,154 +113,51 @@ class Solver(BaseFactorVae):
             self.viz_ta_iter = args.viz_ta_iter
             if not self.viz.win_exists(env=self.name+'/lines', win=self.win_id['D_z']):
                 self.viz_init()
+        """
 
         # Checkpoint
-        self.ckpt_dir = os.path.join(args.ckpt_dir, args.name)
+        self.ckpt_dir = args.ckpt_dir
         self.ckpt_save_iter = args.ckpt_save_iter
         mkdirs(self.ckpt_dir)
-        if args.ckpt_load:
-            self.load_checkpoint(args.ckpt_load)
 
         # Output(latent traverse GIF)
         self.output_dir = os.path.join(args.output_dir, args.name)
         self.output_save = args.output_save
         mkdirs(self.output_dir)
 
-    def select_attention_maps(self, maps):
-        """
-            Implements the mechanism of selection of the attention
-                maps to use in the attention disentanglement loss
-        """
-        return maps[0], maps[1]
-
-    def save_metrics(self, metrics):
-        """ Receives the training list of metric dictionaries and saves it """
-        save_file = os.path.join(self.ckpt_dir, "metrics.json")
-        assert isinstance(metrics, list), "Unexpected type on metrics var" 
-
-        if os.path.isfile(save_file):
-            lst_dicts = json.load(open(save_file))
-            for ele in metrics:
-                lst_dicts.append(ele)
-            json.dump(lst_dicts, open(save_file, mode='w'))
+    def test(self, plot=True):
+        if plot:
+            plt.figure(figsize=(8,4))
+            subdirs = [x[1] for x in os.walk(self.ckpt_dir)]
+            subdirs = subdirs[0]
+            for subdir in subdirs:
+                disent_vals = []
+                iters = []
+                #print(subdir)
+                if "la_1.0" in subdir:
+                    dire = os.path.join(self.ckpt_dir,subdir)
+                    #print(dire)
+                    for f in os.listdir(dire): 
+                        path = str(f)
+                        if ".pth" in path:
+                            it = int(path[0:re.search(r'\b(.pth)\b', path).start()])
+                            #print(it, path)
+                            iters.append(it)
+                            self.load_checkpoint(os.path.join(subdir, path))
+                            val = self.disentanglement_metric()
+                            disent_vals.append(val)
+                    #print(len(iters), len(disent_vals))
+                    plt.plot(iters, disent_vals, label=str(subdir))
+            plt.legend(loc = 'upper center', bbox_to_anchor=(0.5,1.05), ncol=2)
+            plt.ylim([0,1.3])
+            plt.savefig(self.ckpt_dir+'/disent_res_abl.png')
         else:
-            json.dump(metrics, open(save_file, mode='w'))
+            analyse_train_metrics()
+            print("TODO implement training metrics extractor")
 
-    def train(self):
-
-        gcam = GradCamDissen(self.VAE, self.D, target_layer='encode.10', cuda=True) # The FactorVAE encoder contains 6 layers
-        self.net_mode(train=True)
-
-        ones = torch.ones(self.batch_size, dtype=torch.long, device=self.device)
-        zeros = torch.zeros(self.batch_size, dtype=torch.long, device=self.device)
-        mu_avg, logvar_avg, test_index = 0, 1, 0
-        metrics = []
-        out = False
-        while not out:
-            for batch_idx, (x1, x2) in enumerate(self.data_loader):
-                #model.eval()
-                self.global_iter += 1
-                self.pbar.update(1)
-
-                x1 = x1.to(self.device)
-                x1_rec, mu, logvar, z = gcam.forward(x1)
-                # For Standard FactorVAE loss
-                vae_recon_loss = recon_loss(x1, x1_rec)
-                vae_kld = kl_divergence(mu, logvar)
-                D_z = self.D(z)
-                vae_tc_loss = (D_z[:, :1] - D_z[:, 1:]).mean() # TODO where is the log in the equation ??
-
-                factorVae_loss = vae_recon_loss + vae_kld + self.gamma*vae_tc_loss
-                # For attention disentanglement loss
-                gcam.backward(mu, logvar, mu_avg, logvar_avg)
-                gcam_maps = gcam.generate()
-
-                #print(len(gcam_maps))
-                sel = self.select_attention_maps(gcam_maps)
-                att_loss = attention_disentanglement(sel[0], sel[1])
-                
-                vae_loss = factorVae_loss + self.lambdaa*att_loss
-                self.optim_VAE.zero_grad()
-                vae_loss.backward(retain_graph=True)
-                self.optim_VAE.step()
-
-                x2 = x2.to(self.device)
-                z_prime = self.VAE(x2, no_dec=True)
-                z_pperm = permute_dims(z_prime).detach()
-                D_z_pperm = self.D(z_pperm)
-                D_tc_loss = 0.5*(F.cross_entropy(D_z, zeros) + F.cross_entropy(D_z_pperm, ones))
-
-                self.optim_D.zero_grad()
-                D_tc_loss.backward()
-                self.optim_D.step()
-
-                # Saving the metrics
-                metrics.append({'vae_loss': vae_loss.detach().to(torch.device("cpu")).item(), 'D_loss': D_tc_loss.detach().to(torch.device("cpu")).item(), 'recon_loss':vae_recon_loss.detach().to(torch.device("cpu")).item(), 'tc_loss': vae_tc_loss.detach().to(torch.device("cpu")).item()})
-
-                if self.global_iter%self.print_iter == 0:
-                    self.pbar.write('[{}] vae_recon_loss:{:.3f} vae_kld:{:.3f} vae_tc_loss:{:.3f} D_tc_loss:{:.3f}'.format(
-                        self.global_iter, vae_recon_loss.item(), vae_kld.item(), vae_tc_loss.item(), D_tc_loss.item()))
-                
-                if self.global_iter%self.ckpt_save_iter == 0:
-                    self.save_checkpoint(str(self.global_iter)+".pth")
-                    self.save_metrics(metrics)
-                    metrics = []
-                """
-                
-                if self.viz_on and (self.global_iter%self.viz_ll_iter == 0):
-                    soft_D_z = F.softmax(D_z, 1)[:, :1].detach()
-                    soft_D_z_pperm = F.softmax(D_z_pperm, 1)[:, :1].detach()
-                    D_acc = ((soft_D_z >= 0.5).sum() + (soft_D_z_pperm < 0.5).sum()).float()
-                    D_acc /= 2*self.batch_size
-                    self.line_gather.insert(iter=self.global_iter,
-                                            soft_D_z=soft_D_z.mean().item(),
-                                            soft_D_z_pperm=soft_D_z_pperm.mean().item(),
-                                            recon=vae_recon_loss.item(),
-                                            kld=vae_kld.item(),
-                                            acc=D_acc.item())
-
-                if self.viz_on and (self.global_iter%self.viz_la_iter == 0):
-                    self.visualize_line()
-                    self.line_gather.flush()
-
-                if self.viz_on and (self.global_iter%self.viz_ra_iter == 0):
-                    self.image_gather.insert(true=x_true1.data.cpu(),
-                                             recon=F.sigmoid(x_recon).data.cpu())
-                    self.visualize_recon()
-                    self.image_gather.flush()
-
-                if self.viz_on and (self.global_iter%self.viz_ta_iter == 0):
-                    if self.dataset.lower() == '3dchairs':
-                        self.visualize_traverse(limit=2, inter=0.5)
-                    else:
-                        self.visualize_traverse(limit=3, inter=2/3)
-                """               
-                """
-                ## Visualize and save attention maps  ##
-                x1 = x.repeat(1, 3, 1, 1)
-                for i in range(x1.size(0)):
-                    raw_image = x1[i] * 255.0
-                    ndarr = raw_image.permute(1, 2, 0).cpu().byte().numpy()
-                    im = Image.fromarray(ndarr.astype(np.uint8))
-                    im_path = args.result_dir
-                    if not os.path.exists(im_path):
-                        os.mkdir(im_path)
-                    im.save(os.path.join(im_path,
-                                     "{}-{}-origin.png".format(test_index, str(one_class))))
-
-                    file_path = os.path.join(im_path,
-                                         "{}-{}-attmap.png".format(test_index, str(one_class)))
-                    r_im = np.asarray(im)
-                    save_cam(r_im, file_path, gcam_map[i].squeeze().cpu().data.numpy())
-                    test_index += 1
-
-                """
-                if self.global_iter >= self.max_iter:
-                    out = True
-                    break
-
-        self.pbar.write("[Training Finished]")
-        self.pbar.close()
+    def analyse_train_metrics():
+        """ It receives the path to the json file with the metrics and plots them  """
+       print("TODO") 
 
     def disentanglement_metric(self):
         """
@@ -257,7 +171,7 @@ class Solver(BaseFactorVae):
         factors = torch.from_numpy(data['latents_classes'])
         factors = factors[:, 1:] # Removing the color since its always white
         num_classes = [3,6,40,32,32] # the number of latent value factors
-        print("The factors are ", type(factors), factors.shape, "with classes", len(num_classes))
+        #print("The factors are ", type(factors), factors.shape, "with classes", len(num_classes))
         num_factors = len(num_classes)
 
         num_examples_per_vote = 100
@@ -307,6 +221,10 @@ class Solver(BaseFactorVae):
         # Discard the dimensions that collapsed to the prior
         kl_tol = 1e-2
         useful_dims = np.where(mean_kl > kl_tol)[0]
+
+        if len(useful_dims) == 0:
+            print("\nThere's no useful dim for ...\n")
+            return 0
 
         # Compute scales for useful dims
         scales = np.std(all_mus[:, useful_dims], axis=0)
@@ -368,8 +286,7 @@ class Solver(BaseFactorVae):
     def generate_training_batch(self):
         raise NotImplementedError()
 
-
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(description='Factor-VAE')
 
     parser.add_argument('--name', default='main', type=str, help='name of the experiment')
@@ -401,28 +318,31 @@ if __name__ == "__main__":
 
     parser.add_argument('--print_iter', default=500, type=int, help='print losses iter')
 
-    parser.add_argument('--ckpt_dir', default='checkpoints', type=str, help='checkpoint directory')
+    parser.add_argument('--ckpt_dir', default='experiments', type=str, help='checkpoint directory')
     parser.add_argument('--ckpt_load', default=None, type=str, help='checkpoint name to load')
     parser.add_argument('--ckpt_save_iter', default=10000, type=int, help='checkpoint save iter')
 
     parser.add_argument('--output_dir', default='outputs', type=str, help='output directory')
     parser.add_argument('--output_save', default=True, type=str2bool, help='whether to save traverse results')
 
+    parser.add_argument('--seed', type=int, default=1, metavar='S', help='random seed (default: 1)')
+    
     args = parser.parse_args()
 
-    # TODO ablation study aspects to manipulate - reconstruction error (batch), True TC (batch), Estimate TC (batch) and disentanglement metric (after training)
-    gammas = [5,10,15,20,25,30,35,40,45,50]
-    lambdas = [0.33, 0.67, 1.0]
+    # To achieve reproducible results with sequential runs
+    torch.backends.cudnn.enabled = True
+    torch.backends.cudnn.benchmark = True
+
+    init_seed = args.seed
+    torch.manual_seed(init_seed)
+    torch.cuda.manual_seed(init_seed)
+    np.random.seed(init_seed)
+
+    
+    tester = Tester(args)
     start = time.time()
-    for la in lambdas:
-        args.lambdaa = la
-        for ga in gammas:
-            args.gamma = ga
-            args.name = "disent_ga_{}_la_{}_iters_{}/".format(args.gamma, args.lambdaa, int(args.max_iter))
-            solver = Solver(args)
-            solver.train()
-            del solver
+    tester.test()
+    print("Finished after {} mins.".format(str((time.time() - start) // 60)))
 
-    print("Finished after", time.time() - start)
-
-    #solver.disentanglement_metric()
+if __name__ == '__main__':
+    main()
