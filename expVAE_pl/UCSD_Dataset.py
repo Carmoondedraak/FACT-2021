@@ -8,6 +8,7 @@ import os
 import numpy as np
 from PIL import Image
 from utils import download_and_extract
+import random
 
 class ToTensor(object):
     def __call__(self, image):
@@ -31,6 +32,7 @@ class UCSD(data.Dataset):
         if self.split_type == 'train' or self.split_type == 'val':
             folders = sorted([os.path.join(self.path, folder) for folder in os.listdir(self.path) if 'Train' in folder])
             self.files = sorted([os.path.join(folder, file) for folder in folders for file in os.listdir(folder) if '.tif' in file])
+            random.shuffle(self.files)
             if self.split_type == 'train':
                 self.files = self.files[:int(0.9*len(self.files))]
             elif self.split_type == 'val':
