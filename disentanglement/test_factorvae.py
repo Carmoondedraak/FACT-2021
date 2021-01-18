@@ -27,13 +27,8 @@ import re
 from pathlib import Path
 
 
-cuda = torch.cuda.is_available()
-if cuda:
-    print('cuda available')
 
-device = torch.device("cuda" if cuda else "cpu")
-
-### Save attention maps  ###
+### Save attention maps  ### - TODO to use with the attetion maps
 def save_cam(image, filename, gcam):
     gcam = gcam - np.min(gcam)
     gcam = gcam / np.max(gcam)
@@ -82,10 +77,6 @@ class Tester(BaseFactorVae):
         if args.dataset == 'dsprites':
             self.VAE = FactorVAE1(self.z_dim).to(self.device)
             self.nc = 1
-            """
-            for m in self.VAE.named_modules():
-                print(m[0])
-            """
         else:
             self.VAE = FactorVAE2(self.z_dim).to(self.device)
             self.nc = 3
@@ -126,165 +117,81 @@ class Tester(BaseFactorVae):
         mkdirs(self.output_dir)
 
     def test(self, plot=True):
+        subdirs = [x[1] for x in os.walk(self.ckpt_dir)]
+        subdirs = subdirs[0]
         if plot:
-            plt.figure(figsize=(8,4))
-            subdirs = [x[1] for x in os.walk(self.ckpt_dir)]
-            subdirs = subdirs[0]
+            fig = plt.figure(figsize=(8,4))
+            ax = plt.subplot(1,1,1)
             for subdir in subdirs:
                 disent_vals = []
                 iters = []
                 #print(subdir)
-                if "la_1.0" in subdir:
-                    dire = os.path.join(self.ckpt_dir,subdir)
-                    #print(dire)
-                    for f in os.listdir(dire): 
-                        path = str(f)
-                        if ".pth" in path:
-                            it = int(path[0:re.search(r'\b(.pth)\b', path).start()])
-                            #print(it, path)
-                            iters.append(it)
-                            self.load_checkpoint(os.path.join(subdir, path))
-                            val = self.disentanglement_metric()
-                            disent_vals.append(val)
-                    #print(len(iters), len(disent_vals))
-                    plt.plot(iters, disent_vals, label=str(subdir))
-            plt.legend(loc = 'upper center', bbox_to_anchor=(0.5,1.05), ncol=2)
-            plt.ylim([0,1.3])
-            plt.savefig(self.ckpt_dir+'/disent_res_abl.png')
+                if "la_0.33" in subdir:
+                    path = os.path.join(self.ckpt_dir,subdir, "metrics.json")
+                    iters, disent_vals = self.analyse_disentanglement_metric(path)
+                    ax.plot(iters, disent_vals, label=str(subdir))
+            ax.legend(loc = 'upper center', bbox_to_anchor=(0.5,1.05), ncol=2)
+            ax.set_xlabel("iters")
+            ax.set_ylabel("recon_loss")
+            mkdirs(os.path.join(self.ckpt_dir,'output/'))
+            plt.savefig(self.ckpt_dir+'/output'+'/disent_res_abl.png')
         else:
-            analyse_train_metrics()
-            print("TODO implement training metrics extractor")
+            fig, axs = plt.subplots(nrows=2, ncols=1, constrained_layout = True)
+            for subdir in subdirs:
+                #print(subdir)
+                if "la_0.33" in subdir:
+                    path = os.path.join(self.ckpt_dir,subdir, "metrics.json")
+                    iters, recon_loss, tc_loss = self.analyse_train_metrics(path)
+                    axs[0].plot(iters, recon_loss)
+                    axs[1].plot(iters, tc_loss)
 
-    def analyse_train_metrics():
+            axs[1].set_xlabel("iters")
+            axs[0].set_ylabel("recon_loss")
+            axs[1].set_ylabel("tc_loss")
+            mkdirs(os.path.join(self.ckpt_dir,'output/'))
+            plt.savefig(self.ckpt_dir+'/output'+'/disent_train_metrics_abl.png')
+
+    def analyse_train_metrics(self, json_path):
         """ It receives the path to the json file with the metrics and plots them  """
-       print("TODO") 
+        iters = []
+        vae_loss = []
+        D_loss = []
+        recon = []
+        tc = []
 
-    def disentanglement_metric(self):
-        """
-            It is based on "Disentangling by Factorising" paper
-        """
+        lst = json.load(open(json_path, mode="r"))
+        for di in lst:
+            assert isinstance(di, dict), "Got unexpected variable type"
+
+            if di.get("vae_loss") is not None:
+                iters.append(di.get("its"))
+                vae_loss.append(di["vae_loss"])
+                D_loss.append(di["D_loss"])
+                recon.append(di["recon_loss"])
+                tc.append(di["tc_loss"])
         
-        self.net_mode(train=False)
+        return iters, recon, tc     
 
-        root = os.path.join(self.dset_dir, 'dsprites-dataset/dsprites_ndarray_co1sh3sc6or40x32y32_64x64.npz')
-        data = np.load(root, encoding='latin1')
-        factors = torch.from_numpy(data['latents_classes'])
-        factors = factors[:, 1:] # Removing the color since its always white
-        num_classes = [3,6,40,32,32] # the number of latent value factors
-        #print("The factors are ", type(factors), factors.shape, "with classes", len(num_classes))
-        num_factors = len(num_classes)
+    def analyse_disentanglement_metric(self, json_path):
+        """ It receives the path to the json file and plots the proposed metric results  """
+        iters = []
+        scores = []
 
-        num_examples_per_vote = 100
-        num_votes = 800
-        num_votes_per_factor = num_votes// num_factors
-    
-        try:
+        lst = json.load(open(json_path, mode="r"))
+        for di in lst:
+            assert isinstance(di, dict), "Got unexpected variable type"
 
-            all_mus = []
-            all_logvars = []
-            code_list = []
-            for fixed_k in range(num_factors):
-                code_list_per_factor = []
-                for _ in range(num_votes_per_factor):
-                    fixed_value = np.random.choice(num_classes[fixed_k]) 
-                    useful_samples_idx = np.where(factors[:, fixed_k] == fixed_value)[0]
-                    #print("The number of useful samples are", len(useful_samples_idx))
-                    random_idx = np.random.choice(useful_samples_idx, num_examples_per_vote)
-                    sample_imgs = self.data[random_idx]
-                    #print("The num of sampled images is with shape", sample_imgs[0].shape)
-                    # Get the models's predicitions
-                    _, mus, logvars, _ = self.VAE(sample_imgs[0].to(self.device))
-                    mus = mus.detach().to(torch.device("cpu")).numpy()
-                    logvars = logvars.detach().to(torch.device("cpu")).numpy()
-                    #print(type(mus), type(logvars))
-                    all_mus.append(mus)
-                    all_logvars.append(logvars)
-                    code_list_per_factor.append((mus, logvars))
-                    del sample_imgs
-                code_list.append(code_list_per_factor)
-
-        except RuntimeError as e:
-            if 'out of memory' in str(e):
-                print('| Warning: ran out of memory')
-                for p in self.VAE.parameters():
-                    if p.grad is not None:
-                        del p.grad
-                torch.cuda.empty_cache()
-                exit(0)
-            else:
-                raise e
+            if di.get("metric_score") is not None:
+                iters.append(di.get("its"))
+                scores.append(di["metric_score"])
         
-        all_mus = np.concatenate(all_mus, axis=0)
-        all_logvars = np.concatenate(all_logvars, axis=0)
-        
-        mean_kl = self.compute_kl_divergence_mean(all_mus, all_logvars)
-        # Discard the dimensions that collapsed to the prior
-        kl_tol = 1e-2
-        useful_dims = np.where(mean_kl > kl_tol)[0]
+        return iters, scores     
 
-        if len(useful_dims) == 0:
-            print("\nThere's no useful dim for ...\n")
-            return 0
-
-        # Compute scales for useful dims
-        scales = np.std(all_mus[:, useful_dims], axis=0)
-
-        print("The empirical mean for kl dimensions-wise:")
-        print(np.reshape(mean_kl, newshape=(-1,1)))
-        print("Useful dimensions:", useful_dims, " - Total:", useful_dims.shape[0])
-        print("Empirical Scales:", scales)
-
-        # For the classifier
-        d_values = []
-        k_values = []
-        for fixed_k in range(num_factors):
-            #Generate training examples for this factor
-            for i in range(num_votes_per_factor):
-                codes = code_list[fixed_k][i][0]
-                codes = codes[:, useful_dims]
-                norm_codes = codes / scales
-                variance = np.var(norm_codes, axis=0)
-                d_min_var = np.argmin(variance)
-                d_values.append(d_min_var)
-                k_values.append(fixed_k)
-
-        d_values = np.array(d_values)
-        k_values = np.array(k_values)
-
-        v_matrix = np.zeros((useful_dims.shape[0], num_factors))
-        for j in range(useful_dims.shape[0]):
-            for k in range(num_factors):
-                v_matrix[j, k] = np.sum((d_values == j) & (k_values == k))
-
-        print("Votes:\n", v_matrix)
-
-        # Majority vote is C_j argmax_k V_jk
-        classifier = np.argmax(v_matrix, axis=1)
-        predicted_k = classifier[d_values]
-        accuracy = np.sum(predicted_k == k_values) / num_votes
-
-        print("The accuracy is", accuracy)
-        return accuracy
-
-    def compute_kl_divergence_mean(self, all_mus, all_logvar):
-        """ It computes the KL divergence per dimension wrt the prior """
-        variance = np.exp(all_mus, all_logvar)
-        squared_mean = np.square(all_mus)
-        all_kl = 0.5 * (variance - all_logvar + squared_mean - 1)
-        mean_kl = np.mean(all_kl, axis=0)
-        return mean_kl
-
-    def compute_variances(self):
+    def produce_comparison_plot(self):
+        """ It aims to reproduce the results observed in Figure 8 (Just the AD-FactorVAE) """
+        #TODO
         raise NotImplementedError()
 
-
-    def prume_dimensions(self, variances, threshold=0.):
-        """ Verifies the active factors and retrieves their indexes"""
-        raise NotImplementedError()
- 
-
-    def generate_training_batch(self):
-        raise NotImplementedError()
 
 def main():
     parser = argparse.ArgumentParser(description='Factor-VAE')

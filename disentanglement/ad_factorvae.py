@@ -177,8 +177,16 @@ class Solver(BaseFactorVae):
                 D_tc_loss.backward()
                 self.optim_D.step()
 
-                # Saving the metrics
-                metrics.append({'vae_loss': vae_loss.detach().to(torch.device("cpu")).item(), 'D_loss': D_tc_loss.detach().to(torch.device("cpu")).item(), 'recon_loss':vae_recon_loss.detach().to(torch.device("cpu")).item(), 'tc_loss': vae_tc_loss.detach().to(torch.device("cpu")).item()})
+                # Saving the training metrics
+                if self.global_iter % 100 == 0:
+                    metrics.append({'its':self.global_iter, 'vae_loss': vae_loss.detach().to(torch.device("cpu")).item(), 'D_loss': D_tc_loss.detach().to(torch.device("cpu")).item(), 'recon_loss':vae_recon_loss.detach().to(torch.device("cpu")).item(), 'tc_loss': vae_tc_loss.detach().to(torch.device("cpu")).item()})
+
+                # Saving the disentanglement metrics results
+                if self.global_iter % 1000 == 0:
+                    score = self.disentanglement_metric() 
+                    print(type(score))
+                    metrics.append({'its':self.global_iter, 'metric_score': score})
+                    self.net_mode(train=True)
 
                 if self.global_iter%self.print_iter == 0:
                     self.pbar.write('[{}] vae_recon_loss:{:.3f} vae_kld:{:.3f} vae_tc_loss:{:.3f} D_tc_loss:{:.3f}'.format(
@@ -307,6 +315,10 @@ class Solver(BaseFactorVae):
         # Discard the dimensions that collapsed to the prior
         kl_tol = 1e-2
         useful_dims = np.where(mean_kl > kl_tol)[0]
+
+        if len(useful_dims) == 0: #TODO is this the correct way of handling it ???
+            print("\nThere's no useful dim for ...\n")
+            return 0
 
         # Compute scales for useful dims
         scales = np.std(all_mus[:, useful_dims], axis=0)
