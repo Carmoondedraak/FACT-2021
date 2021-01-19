@@ -4,7 +4,6 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 import os
-import cv2
 import argparse
 from PIL import Image
 from utils import *
@@ -13,13 +12,11 @@ from UCSD_Dataset import UCSDDataModule
 from MVTEC_Dataset import MVTECDataModule
 from vae_model import VAE
 from torchvision.utils import make_grid, save_image
-from torchvision.datasets import MNIST
-from torchvision import transforms
-from pytorch_lightning.metrics.functional.classification import roc, auc
+from pytorch_lightning.metrics.functional.classification import roc, auc, iou
 
+# Set seeds for reproducibility
 torch.backends.cudnn.enabled = True
 torch.backends.cudnn.benchmark = True
-
 init_seed = 1
 torch.manual_seed(init_seed)
 torch.cuda.manual_seed(init_seed)
@@ -34,25 +31,35 @@ class ExpVAE(pl.LightningModule):
         
         self.vae = VAE(self.hparams.layer_idx, self.hparams.z_dim, self.hparams.im_shape)
 
-
-    def loss_f(self, recon_x, x, mu, logvar):
+    def loss_f(self, recon_x, x, stats):
         """
         Function which calculates the VAE loss using BCE and KL divergence
             x - that original "target" images
             x_rec - reconstructed images from the model
-            mu, log_var - mean and log variance output of the encoder for calculating KL term
+            stats - contains distribution p and q, the sampled latent z, and the output
+            of the encoder, mu and _logvar
         """
 
+        # Unpack and define some variables for calculating the loss
+        p, q, z, mu, log_var = stats
         batch_size = x.shape[0]
+        n_channels = x.shape[1]
+        # For grayscale, we use summed BCE for reconstruction loss
+        if n_channels == 1:
+            L_rec = F.binary_cross_entropy_with_logits(recon_x, x, reduction='sum')
+        # For color, we use mean MSE for reconstruction loss)
+        elif n_channels == 3:
+            L_rec = F.mse_loss(recon_x, x, reduction='mean')
 
-        # Reconstruction loss using BCE
-        L_rec = F.binary_cross_entropy_with_logits(recon_x, x, reduction='sum')
-
-        # KL divergence between encoder and unit Gaussian
-        L_reg = 0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+        # Compute KL divergence between encoder and unit Gaussian
+        log_qz = q.log_prob(z)
+        log_pz = p.log_prob(z)
+        kl = log_qz - log_pz
+        kl = kl.mean()
+        L_reg = kl*0.1
 
         # Compute final loss
-        loss = L_rec - L_reg
+        loss = L_rec + L_reg
         return loss
 
     def training_step(self, batch, batch_idx):
@@ -61,9 +68,9 @@ class ExpVAE(pl.LightningModule):
         """
         x,  _ = batch
 
-        x_rec, mu, log_var = self.vae(x)
+        x_rec, stats = self.vae(x)
 
-        loss = self.loss_f(x_rec, x, mu, log_var)
+        loss = self.loss_f(x_rec, x, stats)
 
         self.log('train_loss', loss)
 
@@ -74,30 +81,23 @@ class ExpVAE(pl.LightningModule):
         Defines a single validation iteration with the goal of reconstructing the input
         """
         x,  _ = batch
-
+        
         # First dataloader contains images of the class we're training on, so we compute
         # regular VAE loss
         if loader_idx == 0:
-            x_rec, mu, log_var = self.vae(x)
+            x_rec, stats = self.vae(x)
 
-            loss = self.loss_f(x_rec, x, mu, log_var)
+            loss = self.loss_f(x_rec, x, stats)
 
             self.log('val_loss', loss)
 
             return loss
         elif loader_idx == 1:
             _, ground_truth = batch
-
+            
             # For MNIST, there are no ground truth masks, so we don't compute them
-            if x.shape == ground_truth.shape:
-                _, attmaps, _, bloc_maps = self.forward(x)
-
-                fpr, tpr, thresholds = roc(attmaps, ground_truth, pos_label=1)
-                auroc = auc(fpr, tpr)
-
-                self.log('auroc', auroc, prog_bar=True)
-
-                return auroc
+            if x.shape[2:] == ground_truth.shape[2:]:
+                self.binary_loc_evaluation(batch)
 
 
     def test_step(self, batch, batch_idx, loader_idx):
@@ -107,60 +107,74 @@ class ExpVAE(pl.LightningModule):
         x,  _ = batch
 
         if loader_idx == 0:
-            x_rec, mu, log_var = self.vae(x)
+            x_rec, stats = self.vae(x)
 
-            loss = self.loss_f(x_rec, x, mu, log_var)
+            loss = self.loss_f(x_rec, x, stats)
 
             self.log('test_loss', loss)
 
             return loss
         elif loader_idx == 1:
             _, ground_truth = batch
-            
+
             # For MNIST, there are no ground truth masks, so we don't compute them
-            if x.shape == ground_truth.shape:
-                _, attmaps, _, bloc_maps = self.forward(x)
+            if x.shape[2:] == ground_truth.shape[2:]:
+                self.binary_loc_evaluation(batch)
 
-                fpr, tpr, thresholds = roc(attmaps, ground_truth, pos_label=1)
-                auroc = auc(fpr, tpr)
+                # bloc_grid = make_grid(bloc_img.detach().cpu()).numpy()
+                # self.trainer.logger.experiment.add_image('bloc_imgs', bloc_grid, batch_idx)
+                # gt_grid = make_grid(ground_truth.detach().cpu()).numpy()
+                # self.trainer.logger.experiment.add_image('gt_imgs', gt_grid, batch_idx)
 
-                self.log('auroc', auroc, prog_bar=True)
-
-                return auroc
-
-    def forward(self, x, threshold=None):
+    def forward(self, x):
         """
         Forward function which reconstructs input, and also returns attention, color and binary localization maps
         Note that this function is not used during training, only for evaluation
         """
+
+        # Set model to eval, and zero out gradients
         self.eval()
-        x = x.to(self.device)
-        x_rec, mu, log_var = self.vae(x)
-        x_rec = torch.sigmoid(x_rec)
-        
-        if self.hparams.inference_mode == 'mean_sum':
-            score = torch.sum(mu)
-        elif self.hparams.inference_mode == 'normal_diff':
-            z = self.vae.norm_diff_reparametrize(mu, log_var)
-            score = torch.sum(z)
-
         self.zero_grad()
-        if score.requires_grad == False:
-            score.requires_grad = True
-        score.backward(retain_graph=True)
-        dz_da, A = self.vae.get_layer_data()
-        
-        with torch.no_grad():
-            dz_da = dz_da / (torch.sqrt(torch.mean(torch.square(dz_da))))
-            alpha = F.avg_pool2d(dz_da, kernel_size=dz_da.shape[2:])
-            M = torch.sum(alpha*A, dim=1)
-            M = F.interpolate(M.unsqueeze(0), size=self.hparams.im_shape[1:], mode='bilinear', align_corners=False).permute(1,0,2,3)
-            M = torch.abs(M)
 
+        # Make sure gradients are enabled (PyTorch Lightning disables gradients for validation loop, which calls this function)
+        with torch.set_grad_enabled(True):
+            x = x.to(self.device)
+            # x.requires_grad_(True)
+            # Push images through the network to get reconstruction, and mu for computing the score to backprop on
+            x_rec, stats = self.vae(x)
+            p, q, z, mu, log_var = stats
+            x_rec = torch.sigmoid(x_rec)
+            
+            # For mean sum inference, we simply sum the mu vector to compute the score
+            if self.hparams.inference_mode == 'mean_sum':
+                score = torch.sum(mu)
+            elif self.hparams.inference_mode == 'normal_diff':
+                z = self.vae.norm_diff_reparametrize(mu, log_var)
+                score = torch.sum(z)
+
+            # Make sure the score 
+            if score.requires_grad == False:
+                score.requires_grad_()
+            score.backward(retain_graph=True)
+
+            # Retrieve the activations and gradients from the specific layer
+            dz_da, A = self.vae.get_layer_data()
+        
+        # We can now compute the attention maps M and create the color maps
+        dz_da = dz_da / (torch.sqrt(torch.mean(torch.square(dz_da))))
+        alpha = F.avg_pool2d(dz_da, kernel_size=dz_da.shape[2:])
+        M = torch.sum(alpha*A, dim=1)
+        M = F.interpolate(M.unsqueeze(0), size=self.hparams.im_shape[1:], mode='bilinear', align_corners=False).permute(1,0,2,3)
+        M = torch.abs(M)
         colormaps = self.create_colormap(x, M)
-        if threshold == None:
-            threshold = M.float().mean() + M.std()
+
+        # TODO: Put proper threshold
+        threshold = M.float().mean() + M.std()
         bloc_map = self.gen_bloc_map(M, threshold)
+
+        # Zero out the gradients again, and put model back into train mode
+        self.zero_grad()
+        self.train()
 
         return x_rec, M, colormaps, bloc_map
 
@@ -169,6 +183,10 @@ class ExpVAE(pl.LightningModule):
         return optimizer
 
     def set_normal_stats(self, mu, log_var):
+        """
+        Sets the VAE's inference method use the difference between the distribution of the 
+        trained embeddings vs the distribution of the outlier class
+        """
         self.vae.configure_normal(mu=mu, log_var=log_var)
         self.hparams.inference_mode = 'normal_diff'
 
@@ -179,7 +197,9 @@ class ExpVAE(pl.LightningModule):
             attmaps - attention maps from the model inferred from the input images
         """
         attmaps = attmaps.detach()
-        x = x.repeat(1, 3, 1, 1)
+        n_channels = x.shape[1]
+        if n_channels == 1:
+            x = x.repeat(1, 3, 1, 1)
         colormaps = torch.zeros(x.shape)
         for i in range(x.size(0)):
             raw_image = x[i] * 255.0
@@ -194,7 +214,55 @@ class ExpVAE(pl.LightningModule):
         colormaps = colormaps[:, permute]
         return colormaps
 
+    def binary_loc_evaluation(self, batch):
+        x, ground_truth = batch
+        _, attmaps, _, bloc_maps = self.forward(x)
+
+        # Compute the ROC (fpr, tpr) and the thresholds
+        fpr, tpr, thresholds = roc(attmaps, ground_truth, pos_label=1)
+        # Get AUC ROC (AUROC) for this ROC curve and log its value
+        auroc = auc(fpr, tpr)
+        self.log('auroc', auroc, prog_bar=True)
+
+        # Get the best binary localization image by picking threshold with best IOU
+        bloc_img, iou_, threshold = self.bloc_from_iou(attmaps, ground_truth, thresholds)
+
+        # Log iou, theshold
+        self.log('best_iou', iou_)
+        self.log('threshold', threshold)
+
+        return bloc_img
+
+    def bloc_from_iou(self, M, target, thresholds, max_search=100):
+        """
+        Pick the best threshold based off of IOU score, and return the binary localization map, 
+        including IOU score and selected threshold
+            M - Attention map
+            target - Target mask
+            thresholds - Thresholds to search
+            max_search - How many thresholds we want to search at most
+        """
+        # Pick 100 evenly spaced thresholds to compute IOU for
+        step_size = int(len(thresholds)/max_search)
+        thresholds = thresholds[::step_size]
+
+        # Set variables for tracking best iou and thershold
+        best_iou = 0
+        sel_threshold = None
+
+        # Loop through thresholds, keep track of best iou binary localization map and threshold
+        for i, t in enumerate(thresholds):
+            m = self.gen_bloc_map(M, t)
+            iou_score = iou(m, target)
+            if iou_score > best_iou:
+                best_iou = iou_score
+                sel_threshold = t
+                best_bloc = m
+
+        return best_bloc, best_iou, sel_threshold
+
     def gen_bloc_map(self, M, threshold):
+        # Generates a binary localizatino map given a threshold
         M = (M > threshold).to(torch.int)
         return M
 
@@ -264,7 +332,6 @@ class SampleAttentionCallback(pl.Callback):
                 save_image(blocmaps.float(), f'{trainer.logger.log_dir}/{self.epoch}-blocmap.png')
                 trainer.logger.experiment.add_image('blocmaps', blocmaps.numpy(), self.epoch)
 
-
         # Save image reconstruction, which is the first dataloader
         elif output_type == 'rec':
             imgs, _ = next(iter(trainer.val_dataloaders[loader_idx]))
@@ -286,25 +353,28 @@ def exp_vae(args):
     # First pick the correct dataset
     if args.dataset.lower() == 'mnist':
         log_dir = 'mnist_logs'
-        dm = OneClassMNISTDataModule(root='./Datasets/MNIST_dataset')
+        dm = OneClassMNISTDataModule(root='./Datasets/MNIST_dataset', batch_size=args.batch_size, num_workers=args.num_workers)
     elif args.dataset.lower() == 'ucsd':
         log_dir = 'ucsd_logs'
-        dm = UCSDDataModule(root='./Datasets/UCSD_dataset')
+        dm = UCSDDataModule(root='./Datasets/UCSD_dataset', batch_size=args.batch_size, num_workers=args.num_workers)
     elif args.dataset.lower() == 'mvtec':
         log_dir = 'mvtec_logs'
-        dm = MVTECDataModule(root='./Datasets/MVTEC_dataset')
+        dm = MVTECDataModule(root='./Datasets/MVTEC_dataset', batch_size=args.batch_size, num_workers=args.num_workers)
     elif args.dataset.lower() == 'dsprites':
         log_dir = 'dsprites_logs'
         raise NotImplementedError
 
     # Create PyTorch Lightning trainer with callback for sampling, if enabled
+    callbacks = []
     if args.sample_during_training:
         att_map_cb = SampleAttentionCallback(batch_size=args.batch_size, every_n_epoch=args.sample_every_n_epoch)
-    else:
-        att_map_cb = SampleAttentionCallback(batch_size=args.batch_size, every_n_epoch=1e8)
+        callbacks.append(att_map_cb)
 
     # Create checkpoint for saving the model, based on the validation loss
-    monitor = 'val_loss' if args.dataset.lower() == 'mnist' else 'val_loss/dataloader_idx_0'
+    # TODO: Uncomment monitor below if we log something using the validation loader, otherwise it is not needed
+    # monitor = 'val_loss' if args.dataset.lower() == 'mnist' or args.dataset.lower() == 'mvtec' else 'val_loss/dataloader_idx_0'
+    monitor = 'val_loss' if args.dataset.lower() == 'mnist'else 'val_loss/dataloader_idx_0'
+    # monitor = 'val_loss'
     checkpoint_cb = ModelCheckpoint(
         monitor=monitor,
         mode='min',
@@ -315,7 +385,7 @@ def exp_vae(args):
         default_root_dir=log_dir,
         gpus=1 if torch.cuda.is_available() else 0, 
         checkpoint_callback=checkpoint_cb,
-        callbacks=[att_map_cb], 
+        callbacks=callbacks, 
         max_epochs=args.epochs,
         progress_bar_refresh_rate=1 if args.progress_bar else 0
     )

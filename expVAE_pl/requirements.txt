@@ -37,6 +37,7 @@ pyOpenSSL @ file:///home/conda/feedstock_root/build_artifacts/pyopenssl_16080558
 pyparsing==2.4.7
 PySocks @ file:///home/conda/feedstock_root/build_artifacts/pysocks_1610291447907/work
 pytorch-lightning @ file:///home/conda/feedstock_root/build_artifacts/pytorch-lightning_1609937230086/work
+pytorch-lightning-bolts==0.2.5
 PyYAML==5.3.1
 requests @ file:///home/conda/feedstock_root/build_artifacts/requests_1608156231189/work
 requests-oauthlib @ file:///home/conda/feedstock_root/build_artifacts/requests-oauthlib_1595492159598/work
