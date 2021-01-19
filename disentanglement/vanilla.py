@@ -17,6 +17,8 @@ from ops import recon_loss, kl_divergence, permute_dims
 from model import FactorVAE1, FactorVAE2, Discriminator
 from dataset import return_data
 
+import time
+
 # To achieve reproducible results with sequential runs
 torch.backends.cudnn.enabled = True
 torch.backends.cudnn.benchmark = True
@@ -103,7 +105,7 @@ class Solver(BaseFactorVae):
 
         ones = torch.ones(self.batch_size, dtype=torch.long, device=self.device)
         zeros = torch.zeros(self.batch_size, dtype=torch.long, device=self.device)
-
+        metrics = []
         out = False
         while not out:
             for x_true1, x_true2 in self.data_loader:
@@ -134,13 +136,27 @@ class Solver(BaseFactorVae):
                 D_tc_loss.backward()
                 self.optim_D.step()
 
+
+                # Saving the training metrics
+                if self.global_iter % 100 == 0:
+                    metrics.append({'its':self.global_iter, 'vae_loss': vae_loss.detach().to(torch.device("cpu")).item(), 'D_loss': D_tc_loss.detach().to(torch.device("cpu")).item(), 'recon_loss':vae_recon_loss.detach().to(torch.device("cpu")).item(), 'tc_loss': vae_tc_loss.detach().to(torch.device("cpu")).item()})
+
+                # Saving the disentanglement metrics results
+                if self.global_iter % 100 == 0:
+                    score = self.disentanglement_metric() 
+                    metrics.append({'its':self.global_iter, 'metric_score': score})
+                    self.net_mode(train=True) #To continue the training again
+
                 if self.global_iter%self.print_iter == 0:
                     self.pbar.write('[{}] vae_recon_loss:{:.3f} vae_kld:{:.3f} vae_tc_loss:{:.3f} D_tc_loss:{:.3f}'.format(
                         self.global_iter, vae_recon_loss.item(), vae_kld.item(), vae_tc_loss.item(), D_tc_loss.item()))
-
+                
                 if self.global_iter%self.ckpt_save_iter == 0:
                     self.save_checkpoint(str(self.global_iter)+".pth")
+                    self.save_metrics(metrics)
+                    metrics = []
 
+                """
                 if self.viz_on and (self.global_iter%self.viz_ll_iter == 0):
                     soft_D_z = F.softmax(D_z, 1)[:, :1].detach()
                     soft_D_z_pperm = F.softmax(D_z_pperm, 1)[:, :1].detach()
@@ -168,6 +184,7 @@ class Solver(BaseFactorVae):
                         self.visualize_traverse(limit=2, inter=0.5)
                     else:
                         self.visualize_traverse(limit=3, inter=2/3)
+                """
 
                 if self.global_iter >= self.max_iter:
                     out = True
@@ -187,6 +204,8 @@ class Solver(BaseFactorVae):
 
     def viz_init(self):
         super().viz_init()
+
+    
 
 
 if __name__ == "__main__":
@@ -229,6 +248,18 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    solver = Solver(args)
-    solver.train()
-    #solver.disentanglement_metric()
+
+    gammas = [5,10,15,20,25,30,35,40,45,50]
+    lambdas = [1.0] #[0.33, 0.67, 1.0]
+    start = time.time()
+    for la in lambdas:
+        args.lambdaa = la
+        for ga in gammas:
+            args.gamma = ga
+            args.name = "disent_ga_{}_la_{}_iters_{}/".format(args.gamma, args.lambdaa, int(args.max_iter))
+            solver = Solver(args)
+            solver.train()
+            del solver
+
+    print("Finished after", time.time() - start)
+
