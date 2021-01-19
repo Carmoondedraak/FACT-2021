@@ -42,7 +42,6 @@ class ExpVAE(pl.LightningModule):
 
         # Unpack and define some variables for calculating the loss
         p, q, z, mu, log_var = stats
-        batch_size = x.shape[0]
         n_channels = x.shape[1]
         # For grayscale, we use summed BCE for reconstruction loss
         if n_channels == 1:
@@ -120,11 +119,6 @@ class ExpVAE(pl.LightningModule):
             # For MNIST, there are no ground truth masks, so we don't compute them
             if x.shape[2:] == ground_truth.shape[2:]:
                 self.binary_loc_evaluation(batch)
-
-                # bloc_grid = make_grid(bloc_img.detach().cpu()).numpy()
-                # self.trainer.logger.experiment.add_image('bloc_imgs', bloc_grid, batch_idx)
-                # gt_grid = make_grid(ground_truth.detach().cpu()).numpy()
-                # self.trainer.logger.experiment.add_image('gt_imgs', gt_grid, batch_idx)
 
     def forward(self, x):
         """
@@ -353,13 +347,15 @@ def exp_vae(args):
     # First pick the correct dataset
     if args.dataset.lower() == 'mnist':
         log_dir = 'mnist_logs'
-        dm = OneClassMNISTDataModule(root='./Datasets/MNIST_dataset', batch_size=args.batch_size, num_workers=args.num_workers)
+        dm = OneClassMNISTDataModule(root='./Datasets/MNIST_dataset', batch_size=args.batch_size, num_workers=args.num_workers,
+                                    train_digit=args.train_digit, test_digit=args.test_digit)
     elif args.dataset.lower() == 'ucsd':
         log_dir = 'ucsd_logs'
         dm = UCSDDataModule(root='./Datasets/UCSD_dataset', batch_size=args.batch_size, num_workers=args.num_workers)
     elif args.dataset.lower() == 'mvtec':
         log_dir = 'mvtec_logs'
-        dm = MVTECDataModule(root='./Datasets/MVTEC_dataset', batch_size=args.batch_size, num_workers=args.num_workers)
+        dm = MVTECDataModule(root='./Datasets/MVTEC_dataset', batch_size=args.batch_size, num_workers=args.num_workers,
+                            class_name=args.mvtec_object)
     elif args.dataset.lower() == 'dsprites':
         log_dir = 'dsprites_logs'
         raise NotImplementedError
@@ -371,10 +367,7 @@ def exp_vae(args):
         callbacks.append(att_map_cb)
 
     # Create checkpoint for saving the model, based on the validation loss
-    # TODO: Uncomment monitor below if we log something using the validation loader, otherwise it is not needed
-    # monitor = 'val_loss' if args.dataset.lower() == 'mnist' or args.dataset.lower() == 'mvtec' else 'val_loss/dataloader_idx_0'
     monitor = 'val_loss' if args.dataset.lower() == 'mnist'else 'val_loss/dataloader_idx_0'
-    # monitor = 'val_loss'
     checkpoint_cb = ModelCheckpoint(
         monitor=monitor,
         mode='min',
@@ -452,6 +445,10 @@ if __name__ == '__main__':
     # Dataset options
     parser.add_argument('--dataset', default='mnist', type=str, help='Dataset used for training and visualization')
     parser.add_argument('--num_workers', default=4, type=int, help='Number of workers to use for dataloader')
+    # Dataset specific options
+    parser.add_argument('--train_digit', default='1', type=int, help='Digit to be trained on (only for MNIST)')
+    parser.add_argument('--test_digit', default='9', type=int, help='Digit to be evaluated on (only for MNIST)')
+    parser.add_argument('--mvtec_object', default='bottle', type=str, help='Object to be trained and evaluated for with MVTEC dataset')
     
     # Inference option
     parser.add_argument('--inference_mode', default='mean_sum', type=str, help='Method used for attention map generation')
