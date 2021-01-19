@@ -184,9 +184,8 @@ class Solver(BaseFactorVae):
                 # Saving the disentanglement metrics results
                 if self.global_iter % 1000 == 0:
                     score = self.disentanglement_metric() 
-                    print(type(score))
                     metrics.append({'its':self.global_iter, 'metric_score': score})
-                    self.net_mode(train=True)
+                    self.net_mode(train=True) #To continue the training again
 
                 if self.global_iter%self.print_iter == 0:
                     self.pbar.write('[{}] vae_recon_loss:{:.3f} vae_kld:{:.3f} vae_tc_loss:{:.3f} D_tc_loss:{:.3f}'.format(
@@ -368,17 +367,6 @@ class Solver(BaseFactorVae):
         mean_kl = np.mean(all_kl, axis=0)
         return mean_kl
 
-    def compute_variances(self):
-        raise NotImplementedError()
-
-
-    def prume_dimensions(self, variances, threshold=0.):
-        """ Verifies the active factors and retrieves their indexes"""
-        raise NotImplementedError()
- 
-
-    def generate_training_batch(self):
-        raise NotImplementedError()
 
 
 if __name__ == "__main__":
@@ -424,7 +412,7 @@ if __name__ == "__main__":
 
     # TODO ablation study aspects to manipulate - reconstruction error (batch), True TC (batch), Estimate TC (batch) and disentanglement metric (after training)
     gammas = [5,10,15,20,25,30,35,40,45,50]
-    lambdas = [0.33, 0.67, 1.0]
+    lambdas = [1.0] #[0.33, 0.67, 1.0]
     start = time.time()
     for la in lambdas:
         args.lambdaa = la

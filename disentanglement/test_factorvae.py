@@ -116,40 +116,48 @@ class Tester(BaseFactorVae):
         self.output_save = args.output_save
         mkdirs(self.output_dir)
 
-    def test(self, plot=True):
+    def test(self):
         subdirs = [x[1] for x in os.walk(self.ckpt_dir)]
         subdirs = subdirs[0]
-        if plot:
-            fig = plt.figure(figsize=(8,4))
-            ax = plt.subplot(1,1,1)
-            for subdir in subdirs:
-                disent_vals = []
-                iters = []
-                #print(subdir)
-                if "la_0.33" in subdir:
-                    path = os.path.join(self.ckpt_dir,subdir, "metrics.json")
-                    iters, disent_vals = self.analyse_disentanglement_metric(path)
-                    ax.plot(iters, disent_vals, label=str(subdir))
-            ax.legend(loc = 'upper center', bbox_to_anchor=(0.5,1.05), ncol=2)
-            ax.set_xlabel("iters")
-            ax.set_ylabel("recon_loss")
-            mkdirs(os.path.join(self.ckpt_dir,'output/'))
-            plt.savefig(self.ckpt_dir+'/output'+'/disent_res_abl.png')
-        else:
-            fig, axs = plt.subplots(nrows=2, ncols=1, constrained_layout = True)
-            for subdir in subdirs:
-                #print(subdir)
-                if "la_0.33" in subdir:
-                    path = os.path.join(self.ckpt_dir,subdir, "metrics.json")
-                    iters, recon_loss, tc_loss = self.analyse_train_metrics(path)
-                    axs[0].plot(iters, recon_loss)
-                    axs[1].plot(iters, tc_loss)
+        # To plot the disentanglement metric results
+        fig1 = plt.figure(figsize=(9,4))
+        ax1 = plt.subplot(1,1,1)
+        last_scores = []
+        for subdir in subdirs:
+            disent_vals = []
+            iters = []
+            #print(subdir)
+            if "la_1.0" in subdir:
+                path = os.path.join(self.ckpt_dir,subdir, "metrics.json")
+                iters, disent_vals, recon_loss = self.analyse_disentanglement_metric(path)
+                idx1 = subdir.index('_ga')
+                idx2 = subdir.index('_la')
+                idx3 = subdir.index('_iters')
+                last_scores.append((disent_vals[-1], recon_loss, int(subdir[idx1+4:idx2])))
+                ax1.plot(iters, disent_vals, label=subdir[idx1+1:idx3])
+        plt.ylim([0,1.1])
+        ax1.legend(loc = 'upper center', bbox_to_anchor=(0.5,1.15), ncol=3)
+        ax1.set_xlabel("iters")
+        ax1.set_ylabel("disentanglement metric")
+        mkdirs(os.path.join(self.ckpt_dir,'output/'))
+        fig1.savefig(self.ckpt_dir+'/output'+'/disent_res_abl.png')
+        # To plot the training losses
+        fig2, axs = plt.subplots(nrows=2, ncols=1, constrained_layout = True)
+        for subdir in subdirs:
+            #print(subdir)
+            if "la_1.0" in subdir:
+                path = os.path.join(self.ckpt_dir,subdir, "metrics.json")
+                iters, recon_loss, tc_loss = self.analyse_train_metrics(path)
+                axs[0].plot(iters, recon_loss)
+                axs[1].plot(iters, tc_loss)
 
-            axs[1].set_xlabel("iters")
-            axs[0].set_ylabel("recon_loss")
-            axs[1].set_ylabel("tc_loss")
-            mkdirs(os.path.join(self.ckpt_dir,'output/'))
-            plt.savefig(self.ckpt_dir+'/output'+'/disent_train_metrics_abl.png')
+        axs[1].set_xlabel("iters")
+        axs[0].set_ylabel("recon_loss")
+        axs[1].set_ylabel("tc_loss")
+        mkdirs(os.path.join(self.ckpt_dir,'output/'))
+        fig2.savefig(self.ckpt_dir+'/output'+'/disent_train_metrics_abl.png')
+        # To plot the trade-off between disentanglement metric and reconstruction loss
+        self.get_comparison_plot(last_scores)
 
     def analyse_train_metrics(self, json_path):
         """ It receives the path to the json file with the metrics and plots them  """
@@ -176,21 +184,57 @@ class Tester(BaseFactorVae):
         """ It receives the path to the json file and plots the proposed metric results  """
         iters = []
         scores = []
+        final_recon_loss = -1
 
         lst = json.load(open(json_path, mode="r"))
         for di in lst:
             assert isinstance(di, dict), "Got unexpected variable type"
 
             if di.get("metric_score") is not None:
-                iters.append(di.get("its"))
+                iters.append(di["its"])
                 scores.append(di["metric_score"])
+            else:
+                final_recon_loss = di["recon_loss"]
         
-        return iters, scores     
+        return iters, scores, final_recon_loss   
 
-    def produce_comparison_plot(self):
+    def get_comparison_plot(self, last_scores):
         """ It aims to reproduce the results observed in Figure 8 (Just the AD-FactorVAE) """
-        #TODO
-        raise NotImplementedError()
+        model1_distang = [0.69, 0.685, 0.73,0.70,0.625, 0.68]
+        model1_reconErr = [20, 30,42, 58, 60, 111]
+        model1_value = [1,2,4,6,8,16]
+
+        model2_distang = [0.7, 0.75,0.77,0.78,0.825]
+        model2_reconErr = [37, 38,39,40,40]
+        model2_value = [100, 10,20,30,40]
+
+        model3_distang = [x[0] for x in last_scores] #[0.9,0.89,0.895, 0.91]
+        model3_reconErr = [x[1] for x in last_scores] #[38, 39.5, 40,40]
+        model3_value = [x[2] for x in last_scores] #[10,20,30,40]
+
+        fig, ax = plt.subplots()
+
+        scatter = ax.scatter(model1_reconErr, model1_distang, marker="o", c='b', label='beta VAE')
+        for i, txt in enumerate(model1_value):
+            ax.annotate(txt, (model1_reconErr[i], model1_distang[i]), size=12)
+
+        scatter = ax.scatter(model2_reconErr, model2_distang, marker="o", c='g', label='factor VAE')
+        for i, txt in enumerate(model2_value):
+            ax.annotate(txt, (model2_reconErr[i], model2_distang[i]), size=12)
+
+        scatter = ax.scatter(model3_reconErr, model3_distang, marker="o", c='r', label='AD factor VAE')
+        for i, txt in enumerate(model3_value):
+            ax.annotate(txt, (model3_reconErr[i], model3_distang[i]), size=12)
+
+        plt.rc('axes', labelsize=8)
+        ax.legend(loc="upper right" )
+        ax.set_title('Reconstruction error plotted against disentanglement metric ', size = 18)
+        ax.set_xlabel('reconstruction error', size = 15)
+        ax.set_ylabel('disentanglement metric', size = 15)
+        plt.xlim([0, 150])
+        plt.ylim([0.3, 1])
+        plt.grid(color='r', linestyle=':', linewidth=0.5)
+        fig.savefig(self.ckpt_dir+'/output'+'/figure8.png')
 
 
 def main():
@@ -249,7 +293,7 @@ def main():
     tester = Tester(args)
     start = time.time()
     tester.test()
-    print("Finished after {} mins.".format(str((time.time() - start) // 60)))
+    #print("Finished after {} mins.".format(str((time.time() - start) // 60)))
 
 if __name__ == '__main__':
     main()
