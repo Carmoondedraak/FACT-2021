@@ -44,8 +44,7 @@ class VAE(nn.Module):
                 nn.LeakyReLU(),
                 nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1),
                 nn.LeakyReLU(),
-                nn.ConvTranspose2d(64, 1, kernel_size=4, stride=2, padding=1),
-                # nn.Sigmoid()
+                nn.ConvTranspose2d(64, 1, kernel_size=4, stride=2, padding=1)
             )
             
             # ResNet encoder is saved in self.encoder, but only used for MVTEC dataset. Setting this to None
@@ -80,8 +79,7 @@ class VAE(nn.Module):
                 nn.LeakyReLU(),
                 nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1),
                 nn.LeakyReLU(),
-                nn.ConvTranspose2d(64, 1, kernel_size=4, stride=2, padding=1),
-                # nn.Sigmoid()
+                nn.ConvTranspose2d(64, 1, kernel_size=4, stride=2, padding=1)
             )
             
             # ResNet encoder is saved in self.encoder, but only used for MVTEC dataset. Setting this to None

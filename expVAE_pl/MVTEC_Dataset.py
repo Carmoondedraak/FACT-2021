@@ -50,9 +50,11 @@ class MVTEC(Dataset):
             ground_truth_folders = [os.path.join(ground_truth_path, folder) for folder in sorted(os.listdir(ground_truth_path))]
             self.gt_data = [(os.path.join(folder, file), folder.rsplit('/')[-1]) for folder in ground_truth_folders for file in sorted(os.listdir(folder))]
 
-        # If condition is not None, we want to grab only the images of a given condition
-        if self.condition is not None:
-            self.data = [(path, label) for (path, label) in self.data if label == self.condition]
+            # If condition is not None, we want to grab only the images of a given condition
+            if self.condition is not None:
+                self.data = [(path, label) for (path, label) in self.data if label == self.condition]
+            else:
+                self.data = [(path, label) for (path, label) in self.data if 'good' not in label]
 
         # Define the transforms to be used glboally
         self.transforms = transform
@@ -81,14 +83,13 @@ class MVTEC(Dataset):
                 gt_filename, gt_label = self.gt_data[i]
                 gt_img = Image.open(gt_filename)
                 gt_img = self.target_transforms(gt_img)
-
             return img, gt_img
 
     def __len__(self):
         return len(self.data)
 
 class MVTECDataModule(LightningDataModule):
-    def __init__(self, root='./MVTEC_dataset', class_name='bottle', batch_size=64, num_workers=4):
+    def __init__(self, root='./MVTEC_dataset', class_name='bottle', batch_size=16, num_workers=4):
         self.dims = (3, 256, 256)
         self.data_dir, self.batch_size, self.num_workers = root, batch_size, num_workers
 
@@ -97,9 +98,9 @@ class MVTECDataModule(LightningDataModule):
         self.transform = trforms.Compose([
             trforms.Resize(self.dims[1:]),
             trforms.RandomHorizontalFlip(),
-            trforms.RandomRotation(90),
+            trforms.RandomRotation(45),
             trforms.ToTensor(),
-            trforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+            # trforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
         ])
 
         # Transforms used on the target/mask images
@@ -112,7 +113,7 @@ class MVTECDataModule(LightningDataModule):
         self.test_transform = trforms.Compose([
             trforms.Resize(self.dims[1:]),
             trforms.ToTensor(),
-            trforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+            # trforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
         ])
 
         # List all available class names for images

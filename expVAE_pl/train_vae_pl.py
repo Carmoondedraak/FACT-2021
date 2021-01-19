@@ -137,7 +137,11 @@ class ExpVAE(pl.LightningModule):
             # Push images through the network to get reconstruction, and mu for computing the score to backprop on
             x_rec, stats = self.vae(x)
             p, q, z, mu, log_var = stats
-            x_rec = torch.sigmoid(x_rec)
+            n_channels = x.shape[1]
+            if n_channels == 1:
+                x_rec = torch.sigmoid(x_rec)
+            elif n_channels == 3:
+                x_rec = torch.tanh(x_rec)
             
             # For mean sum inference, we simply sum the mu vector to compute the score
             if self.hparams.inference_mode == 'mean_sum':
@@ -162,15 +166,11 @@ class ExpVAE(pl.LightningModule):
         M = torch.abs(M)
         colormaps = self.create_colormap(x, M)
 
-        # TODO: Put proper threshold
-        threshold = M.float().mean() + M.std()
-        bloc_map = self.gen_bloc_map(M, threshold)
-
         # Zero out the gradients again, and put model back into train mode
         self.zero_grad()
         self.train()
 
-        return x_rec, M, colormaps, bloc_map
+        return x_rec, M, colormaps
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr)
@@ -210,7 +210,10 @@ class ExpVAE(pl.LightningModule):
 
     def binary_loc_evaluation(self, batch):
         x, ground_truth = batch
-        _, attmaps, _, bloc_maps = self.forward(x)
+        ground_truth = ground_truth.to(self.device)
+
+        # Compute attention maps
+        _, attmaps, _ = self.forward(x)
 
         # Compute the ROC (fpr, tpr) and the thresholds
         fpr, tpr, thresholds = roc(attmaps, ground_truth, pos_label=1)
@@ -308,7 +311,7 @@ class SampleAttentionCallback(pl.Callback):
         # Save attentionmaps of "other class", which is the second dataloader
         if output_type == 'attmaps':
             imgs, targets = next(iter(trainer.val_dataloaders[loader_idx]))
-            _, _, colormaps, blocmaps = pl_module.forward(imgs)
+            _, _, colormaps = pl_module.forward(imgs)
             colormaps = colormaps.detach().cpu()
             colormaps_grid = make_grid(colormaps)
             save_image(colormaps_grid.float(), f'{trainer.logger.log_dir}/{self.epoch}-attmaps.png')
@@ -320,8 +323,10 @@ class SampleAttentionCallback(pl.Callback):
                 save_image(targets.float(), f'{trainer.logger.log_dir}/{self.epoch}-targets.png')
                 trainer.logger.experiment.add_image('targets', targets.numpy(), self.epoch)
 
-            # Save binary localization maps for UCSD datset
-            if 'ucsd' in dataset_name:
+            # Save binary localization maps for UCSD and MVTEC datasets
+            if 'ucsd' in dataset_name or 'mvtec' in dataset_name:
+                imgs, targets = next(iter(trainer.val_dataloaders[loader_idx]))
+                blocmaps = pl_module.binary_loc_evaluation((imgs, targets))
                 blocmaps = make_grid(blocmaps.detach().cpu())
                 save_image(blocmaps.float(), f'{trainer.logger.log_dir}/{self.epoch}-blocmap.png')
                 trainer.logger.experiment.add_image('blocmaps', blocmaps.numpy(), self.epoch)
@@ -329,7 +334,7 @@ class SampleAttentionCallback(pl.Callback):
         # Save image reconstruction, which is the first dataloader
         elif output_type == 'rec':
             imgs, _ = next(iter(trainer.val_dataloaders[loader_idx]))
-            img_rec, _, _, _ = pl_module.forward(imgs)
+            img_rec, _, _ = pl_module.forward(imgs)
             img_rec = img_rec.detach().cpu()
             img_rec = make_grid(img_rec)
             save_image(img_rec.float(), f'{trainer.logger.log_dir}/{self.epoch}-rec.png')
