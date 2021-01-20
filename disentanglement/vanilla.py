@@ -19,15 +19,6 @@ from dataset import return_data
 
 import time
 
-# To achieve reproducible results with sequential runs
-torch.backends.cudnn.enabled = True
-torch.backends.cudnn.benchmark = True
-
-init_seed = 1
-torch.manual_seed(init_seed)
-torch.cuda.manual_seed(init_seed)
-np.random.seed(init_seed)
-
 
 class Solver(BaseFactorVae):
     def __init__(self, args):
@@ -142,7 +133,7 @@ class Solver(BaseFactorVae):
                     metrics.append({'its':self.global_iter, 'vae_loss': vae_loss.detach().to(torch.device("cpu")).item(), 'D_loss': D_tc_loss.detach().to(torch.device("cpu")).item(), 'recon_loss':vae_recon_loss.detach().to(torch.device("cpu")).item(), 'tc_loss': vae_tc_loss.detach().to(torch.device("cpu")).item()})
 
                 # Saving the disentanglement metrics results
-                if self.global_iter % 100 == 0:
+                if self.global_iter % 1500 == 0:
                     score = self.disentanglement_metric() 
                     metrics.append({'its':self.global_iter, 'metric_score': score})
                     self.net_mode(train=True) #To continue the training again
@@ -193,19 +184,6 @@ class Solver(BaseFactorVae):
         self.pbar.write("[Training Finished]")
         self.pbar.close()
 
-    def visualize_recon(self):
-        super().visualize_recon()
-
-    def visualize_line(self):
-        super().visualize_line()
-
-    def visualize_traverse(self, limit=3, inter=2/3, loc=-1):
-        super().visualize_traverse(limit, inter, loc)
-
-    def viz_init(self):
-        super().viz_init()
-
-    
 
 
 if __name__ == "__main__":
@@ -248,18 +226,26 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-
-    gammas = [5,10,15,20,25,30,35,40,45,50]
-    lambdas = [1.0] #[0.33, 0.67, 1.0]
+    seeds = [1,2]
     start = time.time()
-    for la in lambdas:
-        args.lambdaa = la
+    for seed in seeds:
+        # To achieve reproducible results with sequential runs
+        torch.backends.cudnn.enabled = True
+        torch.backends.cudnn.benchmark = True
+
+        init_seed = seed
+        torch.manual_seed(init_seed)
+        torch.cuda.manual_seed(init_seed)
+        np.random.seed(init_seed)
+
+
+        gammas = [10,20,30,40,50]
         for ga in gammas:
             args.gamma = ga
-            args.name = "disent_ga_{}_la_{}_iters_{}/".format(args.gamma, args.lambdaa, int(args.max_iter))
+            args.name = "disent_ga_{}_la_{}_iters_{}_seed_{}/".format(args.gamma, 1.0, int(args.max_iter), seed)
             solver = Solver(args)
             solver.train()
             del solver
 
-    print("Finished after", time.time() - start)
+    print("Finished after {} mins.".format(str((time.time() - start) // 60)))
 
