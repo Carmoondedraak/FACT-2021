@@ -1,7 +1,7 @@
 import os
 import torch
 import torchvision.transforms.functional as F
-from utils import set_work_directory, download_and_extract
+from utils import set_work_directory, download_and_extract, UnNormalize
 from torch.utils.data import Dataset, DataLoader
 from pytorch_lightning import LightningDataModule
 from torchvision import transforms as trforms
@@ -59,7 +59,7 @@ class MVTEC(Dataset):
         # Define the transforms to be used glboally
         self.transforms = transform
         self.target_transforms = target_transform
-        self.test_transforms = target_transform
+        self.test_transforms = test_transform
 
     def __getitem__(self, i):
         # Read the input image and condition label
@@ -93,14 +93,17 @@ class MVTECDataModule(LightningDataModule):
         self.dims = (3, 256, 256)
         self.data_dir, self.batch_size, self.num_workers = root, batch_size, num_workers
 
-        # TODO: With normalization, performs better, but printed images are weird
+        self.ch_mu, self.ch_std = (0.5,0.5,0.5), (0.5,0.5,0.5)
+
+        self.unnormalize = UnNormalize(self.ch_mu, self.ch_std)
+
         # Training transforms, which include augmentation and normalization
         self.transform = trforms.Compose([
             trforms.Resize(self.dims[1:]),
             trforms.RandomHorizontalFlip(),
-            trforms.RandomRotation(45),
+            trforms.RandomRotation(90),
             trforms.ToTensor(),
-            # trforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+            trforms.Normalize(self.ch_mu, self.ch_std)
         ])
 
         # Transforms used on the target/mask images
@@ -113,7 +116,7 @@ class MVTECDataModule(LightningDataModule):
         self.test_transform = trforms.Compose([
             trforms.Resize(self.dims[1:]),
             trforms.ToTensor(),
-            # trforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+            trforms.Normalize(self.ch_mu, self.ch_std)
         ])
 
         # List all available class names for images
@@ -139,7 +142,7 @@ class MVTECDataModule(LightningDataModule):
         Creates 3 Datasets
             train_set - For loading "good" conditioned images from the train folder
             val_set - For loading "good" conditioned images from the test folder for validation/training (we don't create separate splits for train and test in our case)
-            eval_set - For loading any image conditioned image for VAE evaluation
+            eval_set - For loading any conditioned image for VAE evaluation
         """
         self.train_set = MVTEC(self.data_dir, self.class_name, self.transform, self.target_transform, self.test_transform, train=True)
         self.val_set = MVTEC(self.data_dir, self.class_name, self.transform, self.target_transform, self.test_transform, train=False, condition='good')
@@ -161,3 +164,6 @@ class MVTECDataModule(LightningDataModule):
         trained_digit_loader = DataLoader(self.val_set, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=True)
         eval_digit_loader = DataLoader(self.eval_set, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=True)
         return [trained_digit_loader, eval_digit_loader]
+
+    def unnormalize_batch(self, images):
+        return self.unnormalize(images)

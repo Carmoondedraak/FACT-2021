@@ -13,6 +13,7 @@ from MVTEC_Dataset import MVTECDataModule
 from vae_model import VAE
 from torchvision.utils import make_grid, save_image
 from pytorch_lightning.metrics.functional.classification import roc, auc, iou
+from pytorch_lightning import metrics
 
 # Set seeds for reproducibility
 torch.backends.cudnn.enabled = True
@@ -24,12 +25,26 @@ np.random.seed(init_seed)
 
 class ExpVAE(pl.LightningModule):
     
-    def __init__(self, im_shape, lr=1e-3, inference_mode='mean_sum', layer_idx=2, z_dim=32):
+    def __init__(self, im_shape, lr=1e-3, inference_mode='mean_sum', layer_idx=2, z_dim=32, auroc=False):
+        """
+        args:
+            lr - Learning rate used for training
+            inference_mode - Which kind of inferencing to use to calculate the score to be backpropagated on
+                        options are 'mean_sum' and 'normal_diff'
+            layer_idx - Index for which layer of the network to use the activations and gradients for for 
+                        attention map generation
+            z_dim - The latent dimension size to use for encoding/decoding
+            auroc - Boolean switch, indicating whether we have access to target masks and if we want to compute
+                    the AUROC scores for them. MNIST doesn't have target masks, UCSD and MVTEC do
+        """
         super().__init__()
 
         self.save_hyperparameters()
         
         self.vae = VAE(self.hparams.layer_idx, self.hparams.z_dim, self.hparams.im_shape)
+
+        if self.hparams.auroc:
+            self.roc = metrics.ROC(pos_label=1)
 
     def loss_f(self, recon_x, x, stats):
         """
@@ -95,9 +110,25 @@ class ExpVAE(pl.LightningModule):
             _, ground_truth = batch
             
             # For MNIST, there are no ground truth masks, so we don't compute them
-            if x.shape[2:] == ground_truth.shape[2:]:
-                self.binary_loc_evaluation(batch)
+            if self.hparams.auroc:
+                x, ground_truth = batch
+                ground_truth = ground_truth.to(self.device)
 
+                # Compute attention maps
+                _, attmaps, _ = self.forward(x)
+
+                # Update the ROC with new predictions and ground truths
+                self.roc.update(attmaps, ground_truth)
+
+    def validation_epoch_end(self, outputs):
+        """
+        After going through the entire validation set, we compute the final ROC curve accumulated overall
+        predictions and target masks, then compute the AUROC
+        """
+        if self.hparams.auroc:
+            fpr, tpr, thresholds = self.roc.compute()
+            auroc = auc(fpr, tpr)
+            self.log('auroc', auroc)
 
     def test_step(self, batch, batch_idx, loader_idx):
         """
@@ -115,10 +146,27 @@ class ExpVAE(pl.LightningModule):
             return loss
         elif loader_idx == 1:
             _, ground_truth = batch
-
+            
             # For MNIST, there are no ground truth masks, so we don't compute them
-            if x.shape[2:] == ground_truth.shape[2:]:
-                self.binary_loc_evaluation(batch)
+            if self.hparams.auroc:
+                x, ground_truth = batch
+                ground_truth = ground_truth.to(self.device)
+
+                # Compute attention maps
+                _, attmaps, _ = self.forward(x)
+
+                # Update the ROC with new predictions and ground truths
+                self.roc.update(attmaps, ground_truth)
+
+    def test_epoch_end(self, outputs):
+        """
+        After going through the entire test set, we compute the final ROC curve accumulated overall
+        predictions and target masks, then compute the AUROC
+        """
+        if self.hparams.auroc:
+            fpr, tpr, thresholds = self.roc.compute()
+            auroc = auc(fpr, tpr)
+            self.log('auroc', auroc)
 
     def forward(self, x):
         """
@@ -133,7 +181,6 @@ class ExpVAE(pl.LightningModule):
         # Make sure gradients are enabled (PyTorch Lightning disables gradients for validation loop, which calls this function)
         with torch.set_grad_enabled(True):
             x = x.to(self.device)
-            # x.requires_grad_(True)
             # Push images through the network to get reconstruction, and mu for computing the score to backprop on
             x_rec, stats = self.vae(x)
             p, q, z, mu, log_var = stats
@@ -184,12 +231,14 @@ class ExpVAE(pl.LightningModule):
         self.vae.configure_normal(mu=mu, log_var=log_var)
         self.hparams.inference_mode = 'normal_diff'
 
-    def create_colormap(self, x, attmaps):
+    def create_colormap(self, x, attmaps, unnormalize=True):
         """
         Creates and returns a colormap from the attention map and original input image
             x - original input images
             attmaps - attention maps from the model inferred from the input images
         """
+        if unnormalize:
+            x = self.trainer.datamodule.unnormalize_batch(x)
         attmaps = attmaps.detach()
         n_channels = x.shape[1]
         if n_channels == 1:
@@ -216,19 +265,20 @@ class ExpVAE(pl.LightningModule):
         _, attmaps, _ = self.forward(x)
 
         # Compute the ROC (fpr, tpr) and the thresholds
-        fpr, tpr, thresholds = roc(attmaps, ground_truth, pos_label=1)
+        self.roc.update(attmaps, ground_truth)
+        # fpr, tpr, thresholds = roc(attmaps, ground_truth, pos_label=1)
         # Get AUC ROC (AUROC) for this ROC curve and log its value
-        auroc = auc(fpr, tpr)
-        self.log('auroc', auroc, prog_bar=True)
+        # auroc = auc(fpr, tpr)
+        # self.log('auroc', auroc, prog_bar=True)
 
         # Get the best binary localization image by picking threshold with best IOU
-        bloc_img, iou_, threshold = self.bloc_from_iou(attmaps, ground_truth, thresholds)
+        # bloc_img, iou_, threshold = self.bloc_from_iou(attmaps, ground_truth, thresholds)
 
         # Log iou, theshold
-        self.log('best_iou', iou_)
-        self.log('threshold', threshold)
+        # self.log('best_iou', iou_)
+        # self.log('threshold', threshold)
 
-        return bloc_img
+        # return bloc_img
 
     def bloc_from_iou(self, M, target, thresholds, max_search=100):
         """
@@ -314,65 +364,78 @@ class SampleAttentionCallback(pl.Callback):
             _, _, colormaps = pl_module.forward(imgs)
             colormaps = colormaps.detach().cpu()
             colormaps_grid = make_grid(colormaps)
-            save_image(colormaps_grid.float(), f'{trainer.logger.log_dir}/{self.epoch}-attmaps.png')
+            save_image(colormaps_grid, f'{trainer.logger.log_dir}/{self.epoch}-attmaps.png')
             trainer.logger.experiment.add_image('attmaps', colormaps_grid.numpy(), self.epoch)
 
             # For UCSD and MVTEC, show target masks
             if 'ucsd' in dataset_name or 'mvtec' in dataset_name:
-                targets = make_grid(targets)
-                save_image(targets.float(), f'{trainer.logger.log_dir}/{self.epoch}-targets.png')
-                trainer.logger.experiment.add_image('targets', targets.numpy(), self.epoch)
+                targets_grid = make_grid(targets)
+                save_image(targets_grid.float(), f'{trainer.logger.log_dir}/{self.epoch}-targets.png')
+                trainer.logger.experiment.add_image('targets', targets_grid.numpy(), self.epoch)
 
             # Save binary localization maps for UCSD and MVTEC datasets
-            if 'ucsd' in dataset_name or 'mvtec' in dataset_name:
-                imgs, targets = next(iter(trainer.val_dataloaders[loader_idx]))
-                blocmaps = pl_module.binary_loc_evaluation((imgs, targets))
-                blocmaps = make_grid(blocmaps.detach().cpu())
-                save_image(blocmaps.float(), f'{trainer.logger.log_dir}/{self.epoch}-blocmap.png')
-                trainer.logger.experiment.add_image('blocmaps', blocmaps.numpy(), self.epoch)
+            # if 'ucsd' in dataset_name or 'mvtec' in dataset_name:
+            #     blocmaps = pl_module.binary_loc_evaluation((imgs, targets))
+            #     blocmaps = make_grid(blocmaps.detach().cpu())
+            #     save_image(blocmaps.float(), f'{trainer.logger.log_dir}/{self.epoch}-blocmap.png')
+            #     trainer.logger.experiment.add_image('blocmaps', blocmaps.numpy(), self.epoch)
 
         # Save image reconstruction, which is the first dataloader
         elif output_type == 'rec':
             imgs, _ = next(iter(trainer.val_dataloaders[loader_idx]))
             img_rec, _, _ = pl_module.forward(imgs)
             img_rec = img_rec.detach().cpu()
+            img_rec = trainer.datamodule.unnormalize_batch(img_rec)
             img_rec = make_grid(img_rec)
-            save_image(img_rec.float(), f'{trainer.logger.log_dir}/{self.epoch}-rec.png')
+            save_image(img_rec, f'{trainer.logger.log_dir}/{self.epoch}-rec.png')
             trainer.logger.experiment.add_image('rec_images', img_rec.numpy(), self.epoch)
         
-        # Also save original input image
+        # Also save original input image if enabled
         if include_input:
-            imgs_grid = make_grid(imgs)
-            save_image(imgs_grid.float(), f'{trainer.logger.log_dir}/{self.epoch}-input.png')
+            img_unnormalized = trainer.datamodule.unnormalize_batch(imgs)
+            save_image(img_unnormalized, f'{trainer.logger.log_dir}/{self.epoch}-input.png')
 
 # Main function which initializes the datasets, models, and preps them for training or evaluation
 def exp_vae(args):
+    # Set working directory to project directory
     set_work_directory()
 
     # First pick the correct dataset
     if args.dataset.lower() == 'mnist':
+        # MNIST can have a train digit and a test/eval digit
         log_dir = 'mnist_logs'
         dm = OneClassMNISTDataModule(root='./Datasets/MNIST_dataset', batch_size=args.batch_size, num_workers=args.num_workers,
                                     train_digit=args.train_digit, test_digit=args.test_digit)
+
+        # MNIST has no masks, so we only qualitatively test it (no AUROC)
+        quantitative_eval = False
     elif args.dataset.lower() == 'ucsd':
+        # UCSD has pedestrians in the training images, and other vehicles in the test images
         log_dir = 'ucsd_logs'
         dm = UCSDDataModule(root='./Datasets/UCSD_dataset', batch_size=args.batch_size, num_workers=args.num_workers)
+
+        # UCSD has target masks, so we also want to quantitatively evaluate the binary localization maps
+        quantitative_eval = True
     elif args.dataset.lower() == 'mvtec':
         log_dir = 'mvtec_logs'
         dm = MVTECDataModule(root='./Datasets/MVTEC_dataset', batch_size=args.batch_size, num_workers=args.num_workers,
                             class_name=args.mvtec_object)
+        
+        # UCSD has target masks, so we also want to quantitatively evaluate the binary localization maps
+        quantitative_eval = True
     elif args.dataset.lower() == 'dsprites':
         log_dir = 'dsprites_logs'
         raise NotImplementedError
 
-    # Create PyTorch Lightning trainer with callback for sampling, if enabled
+    # Create PyTorch Lightning callback for sampling, if enabled
     callbacks = []
     if args.sample_during_training:
         att_map_cb = SampleAttentionCallback(batch_size=args.batch_size, every_n_epoch=args.sample_every_n_epoch)
         callbacks.append(att_map_cb)
 
     # Create checkpoint for saving the model, based on the validation loss
-    monitor = 'val_loss' if args.dataset.lower() == 'mnist'else 'val_loss/dataloader_idx_0'
+    # monitor = 'val_loss' if args.dataset.lower() == 'mnist'else 'val_loss/dataloader_idx_0'
+    monitor = 'val_loss'
     checkpoint_cb = ModelCheckpoint(
         monitor=monitor,
         mode='min',

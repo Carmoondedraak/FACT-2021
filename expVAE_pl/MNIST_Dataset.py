@@ -6,7 +6,7 @@ from torchvision.datasets import MNIST
 import torchvision.transforms as trforms
 import cv2
 import os
-from utils import *
+from utils import UnNormalize
 
 # Extends torchvision MNISt dataset, overwriting the data to only have a single class
 class OneClassMNIST(MNIST):
@@ -32,8 +32,14 @@ class OneClassMNISTDataModule(pl.LightningDataModule):
         self.dims = (1,28,28)
         self.data_dir, self.train_digit, self.test_digit, self.batch_size, self.num_workers = root, \
             train_digit, test_digit, batch_size, num_workers
+
+        self.ch_mu, self.ch_std = (0.5), (0.5)
+
+        self.unnormalize = UnNormalize(self.ch_mu, self.ch_std)
+
         self.transform = trforms.Compose([
             trforms.ToTensor(),
+            trforms.Normalize(self.ch_mu, self.ch_std)
         ])
 
         # URL used for downloading the dataset
@@ -73,3 +79,6 @@ class OneClassMNISTDataModule(pl.LightningDataModule):
         trained_digit_loader = DataLoader(self.test_set, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=True)
         eval_digit_loader = DataLoader(self.eval_set, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=True)
         return [trained_digit_loader, eval_digit_loader]
+
+    def unnormalize_batch(self, images):
+        return self.unnormalize(images)

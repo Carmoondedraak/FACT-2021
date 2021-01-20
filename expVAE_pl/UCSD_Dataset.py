@@ -7,7 +7,7 @@ from torchvision.transforms import functional as F
 import os
 import numpy as np
 from PIL import Image
-from utils import download_and_extract
+from utils import download_and_extract, UnNormalize
 import random
 
 # Converts masks to tensor
@@ -84,9 +84,15 @@ class UCSDDataModule(pl.LightningDataModule):
     def __init__(self, root='./UCSD_dataset', batch_size=64, num_workers=4):
         self.dims = (1,100,100)
         self.data_dir, self.batch_size, self.num_workers = root, batch_size, num_workers
+
+        self.ch_mu, self.ch_std = (0.5), (0.5)
+
+        self.unnormalize = UnNormalize(self.ch_mu, self.ch_std)
+
         self.transform = trforms.Compose([
             trforms.Resize(self.dims[1:]),
             trforms.ToTensor(),
+            trforms.Normalize(self.ch_mu, self.ch_std)
         ])
 
         self.target_transform = trforms.Compose([
@@ -128,3 +134,5 @@ class UCSDDataModule(pl.LightningDataModule):
         eval_digit_loader = DataLoader(self.eval_set, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=True)
         return [trained_digit_loader, eval_digit_loader]
 
+    def unnormalize_batch(self, images):
+        return self.unnormalize(images)
