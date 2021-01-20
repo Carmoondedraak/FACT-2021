@@ -43,12 +43,14 @@ def calc_latent_mu_var(model, dm, batch_size):
 
     return norm_mu, norm_var
 
+# Sets working directory to project directory, so that all dataset paths
+# will be relative to the project directory
 def set_work_directory():
     abspath = os.path.abspath(__file__)
     dname = os.path.dirname(abspath)
     os.chdir(dname)
 
-
+# Finds checkpoint and hyperparameter paths for a given directory
 def get_ckpt_path(log_dir, args):
     if args.model_version is None:
         raise ValueError("Must provide argument --model_version pointing to existing model to test when using --eval True")
@@ -74,3 +76,14 @@ def get_ckpt_path(log_dir, args):
     hparams_path = [file for file in os.listdir(version_folder) if '.yaml' in file][0]
 
     return checkpoint_path, os.path.join(version_folder, hparams_path)
+
+# Unnormalizes a batch of images given a mu's and std for each channel
+class UnNormalize(torch.nn.Module):
+    def __init__(self, mean, std, n_channels):
+        self.mean, self.std = torch.tensor(mean).view(n_channels,1,1), torch.tensor(std).view(n_channels,1,1)
+
+    def __call__(self, imgs):
+        
+        un_tensor = imgs * self.std.to(imgs.device)
+        un_tensor = un_tensor + self.mean.to(imgs.device)
+        return un_tensor

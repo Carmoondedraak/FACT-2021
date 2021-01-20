@@ -85,9 +85,9 @@ class UCSDDataModule(pl.LightningDataModule):
         self.dims = (1,100,100)
         self.data_dir, self.batch_size, self.num_workers = root, batch_size, num_workers
 
-        self.ch_mu, self.ch_std = (0.5), (0.5)
+        self.ch_mu, self.ch_std = 0.5, 0.5
 
-        self.unnormalize = UnNormalize(self.ch_mu, self.ch_std)
+        self.unnormalize = UnNormalize(self.ch_mu, self.ch_std, n_channels=1)
 
         self.transform = trforms.Compose([
             trforms.Resize(self.dims[1:]),
