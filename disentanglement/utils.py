@@ -379,7 +379,9 @@ class BaseFactorVae(ABC):
 
     def disentanglement_metric(self):
         """
-            It is based on "Disentangling by Factorising" paper
+            It is based on "Disentangling by Factorising" paper.
+            Moreover it was adapted from 
+            https://github.com/nicolasigor/FactorVAE/blob/f27136ef944b5fded7cc49ecaeb398f6909cc312/vae_dsprites_v2.py#L377
         """
         self.net_mode(train=False)
 
@@ -388,58 +390,46 @@ class BaseFactorVae(ABC):
         factors = torch.from_numpy(data['latents_classes'])
         factors = factors[:, 1:] # Removing the color since its always white
         num_classes = [3,6,40,32,32] # the number of latent value factors
-        print("The factors are ", type(factors), factors.shape, "with classes", len(num_classes))
+        #print("The factors are ", type(factors), factors.shape, "with classes", len(num_classes))
         num_factors = len(num_classes)
 
         num_examples_per_vote = 100
         num_votes = 800
         num_votes_per_factor = num_votes// num_factors
     
-        try:
-
-            all_mus = []
-            all_logvars = []
-            code_list = []
-            for fixed_k in range(num_factors):
-                code_list_per_factor = []
-                for _ in range(num_votes_per_factor):
-                    fixed_value = np.random.choice(num_classes[fixed_k]) 
-                    useful_samples_idx = np.where(factors[:, fixed_k] == fixed_value)[0]
-                    #print("The number of useful samples are", len(useful_samples_idx))
-                    random_idx = np.random.choice(useful_samples_idx, num_examples_per_vote)
-                    sample_imgs = self.data[random_idx]
-                    #print("The num of sampled images is with shape", sample_imgs[0].shape)
-                    # Get the models's predicitions
-                    _, mus, logvars, _ = self.VAE(sample_imgs[0].to(self.device))
-                    mus = mus.detach().to(torch.device("cpu")).numpy()
-                    logvars = logvars.detach().to(torch.device("cpu")).numpy()
-                    #print(type(mus), type(logvars))
-                    all_mus.append(mus)
-                    all_logvars.append(logvars)
-                    code_list_per_factor.append((mus, logvars))
-                    del sample_imgs
-                code_list.append(code_list_per_factor)
-
-        except RuntimeError as e:
-            if 'out of memory' in str(e):
-                print('| Warning: ran out of memory')
-                for p in self.VAE.parameters():
-                    if p.grad is not None:
-                        del p.grad
-                torch.cuda.empty_cache()
-                exit(0)
-            else:
-                raise e
+        all_mus = []
+        all_logvars = []
+        code_list = []
+        for fixed_k in range(num_factors):
+            code_list_per_factor = []
+            for _ in range(num_votes_per_factor): # Generate training examples per factor
+                fixed_value = np.random.choice(num_classes[fixed_k]) 
+                useful_samples_idx = np.where(factors[:, fixed_k] == fixed_value)[0]
+                #print("The number of useful samples are", len(useful_samples_idx))
+                random_idx = np.random.choice(useful_samples_idx, num_examples_per_vote)
+                sample_imgs = self.data[random_idx]
+                #print("The num of sampled images is with shape", sample_imgs[0].shape)
+                # Get the models's predicitions/representations
+                _, mus, logvars, _ = self.VAE(sample_imgs[0].to(self.device))
+                mus = mus.detach().to(torch.device("cpu")).numpy()
+                logvars = logvars.detach().to(torch.device("cpu")).numpy()
+                #print(type(mus), type(logvars))
+                all_mus.append(mus)
+                all_logvars.append(logvars)
+                code_list_per_factor.append((mus, logvars))
+                del sample_imgs # To release the memory
+            code_list.append(code_list_per_factor)
         
         all_mus = np.concatenate(all_mus, axis=0)
         all_logvars = np.concatenate(all_logvars, axis=0)
         
-        mean_kl = self.compute_kl_divergence_mean(all_mus, all_logvars)
+        # Computing the KL divergence wrt the prior
+        emp_mean_kl = self.compute_kl_divergence_mean(all_mus, all_logvars)
         # Discard the dimensions that collapsed to the prior
         kl_tol = 1e-2
-        useful_dims = np.where(mean_kl > kl_tol)[0]
+        useful_dims = np.where(emp_mean_kl > kl_tol)[0]
 
-        if len(useful_dims) == 0: #TODO is this the correct way of handling it ???
+        if len(useful_dims) == 0:
             print("\nThere's no useful dim for ...\n")
             return 0
 
@@ -447,27 +437,33 @@ class BaseFactorVae(ABC):
         scales = np.std(all_mus[:, useful_dims], axis=0)
 
         print("The empirical mean for kl dimensions-wise:")
-        print(np.reshape(mean_kl, newshape=(-1,1)))
+        print(np.reshape(emp_mean_kl, newshape=(-1,1)))
         print("Useful dimensions:", useful_dims, " - Total:", useful_dims.shape[0])
         print("Empirical Scales:", scales)
 
-        # For the classifier
+        # For the classifier - Same loop for remanining process
         d_values = []
         k_values = []
         for fixed_k in range(num_factors):
-            #Generate training examples for this factor
             for i in range(num_votes_per_factor):
+                # Get previously generated codes
                 codes = code_list[fixed_k][i][0]
+                # Discarding non useful dimensions
                 codes = codes[:, useful_dims]
+                # Normalizing each dimension
                 norm_codes = codes / scales
-                variance = np.var(norm_codes, axis=0)
-                d_min_var = np.argmin(variance)
+                emp_variance = np.var(norm_codes, axis=0)
+                d_min_var = np.argmin(emp_variance)
+                # The target index k provides one training input/output
                 d_values.append(d_min_var)
                 k_values.append(fixed_k)
 
         d_values = np.array(d_values)
         k_values = np.array(k_values)
 
+        # Compute matrix V
+        # The metric is the error rate of the classifier but the paper 
+        #   provides accuracy instead (for comparision with previously proposed metric
         v_matrix = np.zeros((useful_dims.shape[0], num_factors))
         for j in range(useful_dims.shape[0]):
             for k in range(num_factors):
@@ -475,19 +471,19 @@ class BaseFactorVae(ABC):
 
         print("Votes:\n", v_matrix)
 
-        # Majority vote is C_j argmax_k V_jk
+        # Majority vote Classifier is C_j argmax_k V_jk
         classifier = np.argmax(v_matrix, axis=1)
         predicted_k = classifier[d_values]
         accuracy = np.sum(predicted_k == k_values) / num_votes
-
+    
         print("The accuracy is", accuracy)
         return accuracy
 
     def compute_kl_divergence_mean(self, all_mus, all_logvar):
         """ It computes the KL divergence per dimension wrt the prior """
-        variance = np.exp(all_mus, all_logvar)
+        variance = np.exp(all_logvar)
         squared_mean = np.square(all_mus)
         all_kl = 0.5 * (variance - all_logvar + squared_mean - 1)
         mean_kl = np.mean(all_kl, axis=0)
         return mean_kl
-
+    
