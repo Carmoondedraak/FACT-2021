@@ -501,7 +501,7 @@ def exp_vae(args):
         # Otherwise, we initialize a new model
         else:
             im_size = dm.dims
-            model = ExpVAE(im_size, layer_idx=args.layer_idx, auroc=quantitative_eval)
+            model = ExpVAE(im_size, lr=args.lr, z_dim=args.z_dim, layer_idx=args.layer_idx, auroc=quantitative_eval)
 
         # Choosing which inferencing method to use
         if args.inference_mode == 'normal_diff':
