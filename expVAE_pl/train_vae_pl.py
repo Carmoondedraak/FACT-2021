@@ -137,6 +137,8 @@ class ExpVAE(pl.LightningModule):
     def test_step(self, batch, batch_idx, loader_idx):
         """
         Defines a single testing iteration with the goal of reconstructing the input
+        For MNIST, it measures VAE loss with goal of reconstructing the input and attention maps on outlier class images
+        For UCSD and MVTEC, it also saves ground truth masks and input images
         """
         x,  _ = batch
 
@@ -150,6 +152,12 @@ class ExpVAE(pl.LightningModule):
             return loss
         elif loader_idx == 1:
             _, ground_truth = batch
+
+            x_rec, M, colormaps = self.forward(x)
+            x_rec, M, colormaps = x_rec.detach().cpu(), M.detach().cpu(), colormaps.detach().cpu()
+
+            colormaps = make_grid(colormaps)
+            save_image(colormaps.float(), f'{self.trainer.logger.log_dir}/batch{batch_idx}-attmaps.png')
             
             # For MNIST, there are no ground truth masks, so we don't compute them
             if self.hparams.auroc:
@@ -162,6 +170,12 @@ class ExpVAE(pl.LightningModule):
                 # Update the ROC with new predictions and ground truths
                 self.roc.update(attmaps, ground_truth)
 
+                # Save ground truth and input images
+                ground_truth = make_grid(ground_truth)
+                save_image(ground_truth.float(), f'{self.trainer.logger.log_dir}/batch{batch_idx}-targets.png')
+                input_imgs = make_grid(x)
+                save_image(input_imgs.float(), f'{self.trainer.logger.log_dir}/batch{batch_idx}-input.png')
+
     def test_epoch_end(self, outputs):
         """
         After going through the entire test set, we compute the final ROC curve accumulated overall
@@ -169,6 +183,8 @@ class ExpVAE(pl.LightningModule):
         """
         if self.hparams.auroc:
             fpr, tpr, thresholds = self.roc.compute()
+            fpr, idx = torch.sort(fpr, descending=False)
+            tpr, thresholds = tpr[idx], thresholds[idx]
             auroc = auc(fpr, tpr)
             self.log('auroc', auroc)
 
