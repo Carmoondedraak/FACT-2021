@@ -46,7 +46,7 @@ class ExpVAE(pl.LightningModule):
         if self.hparams.auroc:
             self.roc = metrics.ROC(pos_label=1)
 
-    def loss_f(self, recon_x, x, stats):
+    def loss_f(self, x_rec, x, stats):
         """
         Function which calculates the VAE loss using BCE and KL divergence
             x - that original "target" images
@@ -60,10 +60,12 @@ class ExpVAE(pl.LightningModule):
         n_channels = x.shape[1]
         # For grayscale, we use summed BCE for reconstruction loss
         if n_channels == 1:
-            L_rec = F.binary_cross_entropy_with_logits(recon_x, x, reduction='sum')
+            # L_rec = F.binary_cross_entropy_with_logits(recon_x, x, reduction='sum')
+            L_rec = F.binary_cross_entropy(x_rec, x, reduction='sum')
+            # L_rec = F.binary_cross_entropy(recon_x, x, reduction='sum')
         # For color, we use mean MSE for reconstruction loss)
         elif n_channels == 3:
-            L_rec = F.mse_loss(recon_x, x, reduction='mean')
+            L_rec = F.mse_loss(x_rec, x, reduction='mean')
 
         # Compute KL divergence between encoder and unit Gaussian
         log_qz = q.log_prob(z)
@@ -127,6 +129,8 @@ class ExpVAE(pl.LightningModule):
         """
         if self.hparams.auroc:
             fpr, tpr, thresholds = self.roc.compute()
+            fpr, idx = torch.sort(fpr, descending=False)
+            tpr, thresholds = tpr[idx], thresholds[idx]
             auroc = auc(fpr, tpr)
             self.log('auroc', auroc)
 
@@ -185,10 +189,6 @@ class ExpVAE(pl.LightningModule):
             x_rec, stats = self.vae(x)
             p, q, z, mu, log_var = stats
             n_channels = x.shape[1]
-            if n_channels == 1:
-                x_rec = torch.sigmoid(x_rec)
-            elif n_channels == 3:
-                x_rec = torch.tanh(x_rec)
             
             # For mean sum inference, we simply sum the mu vector to compute the score
             if self.hparams.inference_mode == 'mean_sum':
@@ -206,7 +206,7 @@ class ExpVAE(pl.LightningModule):
             dz_da, A = self.vae.get_layer_data()
         
         # We can now compute the attention maps M and create the color maps
-        dz_da = dz_da / (torch.sqrt(torch.mean(torch.square(dz_da))))
+        dz_da = dz_da / (torch.sqrt(torch.mean(torch.square(dz_da))) + 1e-5)
         alpha = F.avg_pool2d(dz_da, kernel_size=dz_da.shape[2:])
         M = torch.sum(alpha*A, dim=1)
         M = F.interpolate(M.unsqueeze(0), size=self.hparams.im_shape[1:], mode='bilinear', align_corners=False).permute(1,0,2,3)
@@ -485,7 +485,7 @@ def exp_vae(args):
         # Otherwise, we initialize a new model
         else:
             im_size = dm.dims
-            model = ExpVAE(im_size, layer_idx=args.layer_idx)
+            model = ExpVAE(im_size, layer_idx=args.layer_idx, auroc=quantitative_eval)
 
         # Choosing which inferencing method to use
         if args.inference_mode == 'normal_diff':
@@ -515,7 +515,7 @@ if __name__ == '__main__':
     parser.add_argument('--num_workers', default=4, type=int, help='Number of workers to use for dataloader')
     # Dataset specific options
     parser.add_argument('--train_digit', default='1', type=int, help='Digit to be trained on (only for MNIST)')
-    parser.add_argument('--test_digit', default='9', type=int, help='Digit to be evaluated on (only for MNIST)')
+    parser.add_argument('--test_digit', default='7', type=int, help='Digit to be evaluated on (only for MNIST)')
     parser.add_argument('--mvtec_object', default='bottle', type=str, help='Object to be trained and evaluated for with MVTEC dataset')
     
     # Inference option
