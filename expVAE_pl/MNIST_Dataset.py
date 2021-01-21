@@ -35,11 +35,11 @@ class OneClassMNISTDataModule(pl.LightningDataModule):
 
         self.ch_mu, self.ch_std = 0.5, 0.5
 
-        self.unnormalize = UnNormalize(self.ch_mu, self.ch_std, n_channels=1)
+        self.unnormalize = None
 
         self.transform = trforms.Compose([
             trforms.ToTensor(),
-            trforms.Normalize(self.ch_mu, self.ch_std)
+            # trforms.Normalize(self.ch_mu, self.ch_std)
         ])
 
         # URL used for downloading the dataset
@@ -81,4 +81,7 @@ class OneClassMNISTDataModule(pl.LightningDataModule):
         return [trained_digit_loader, eval_digit_loader]
 
     def unnormalize_batch(self, images):
-        return self.unnormalize(images)
+        if self.unnormalize is None:
+            return images
+        else:
+            return self.unnormalize(images)

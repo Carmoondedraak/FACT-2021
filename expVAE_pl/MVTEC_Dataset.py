@@ -95,7 +95,7 @@ class MVTECDataModule(LightningDataModule):
 
         self.ch_mu, self.ch_std = (0.5,0.5,0.5), (0.5,0.5,0.5)
 
-        self.unnormalize = UnNormalize(self.ch_mu, self.ch_std)
+        self.unnormalize = UnNormalize(self.ch_mu, self.ch_std, n_channels=3)
 
         # Training transforms, which include augmentation and normalization
         self.transform = trforms.Compose([
