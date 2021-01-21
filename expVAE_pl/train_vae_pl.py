@@ -182,12 +182,69 @@ class ExpVAE(pl.LightningModule):
         predictions and target masks, then compute the AUROC
         """
         if self.hparams.auroc:
+            # Compute ROC, then compute AUROC and log the value for the whole test set
             fpr, tpr, thresholds = self.roc.compute()
             fpr, idx = torch.sort(fpr, descending=False)
             tpr, thresholds = tpr[idx], thresholds[idx]
             auroc = auc(fpr, tpr)
             self.log('auroc', auroc)
 
+            # Divide thresholds from ROC into 100 equally separated thresholds
+            step_size = int(len(thresholds)/100)
+            thresholds = thresholds[::step_size]
+
+            # Find best best threshold based off of best IOU
+            best_iou = 0
+            best_threshold = -1
+            # For each threshold, compute IOU for whole test set
+            for i, threshold in enumerate(thresholds):
+                # TODO: Check if this is the correct dataloader
+                test_dataloader = self.trainer.datamodule.test_dataloader()[1]
+                ious = []
+                for batch_idx, (x, y) in enumerate(test_dataloader):
+                    x, y = x.to(self.device), y.to(self.device)
+                    x_rec, M, colormaps = self.forward(x)
+                    bloc_map = self.gen_bloc_map(M, threshold)
+                    iou_score = iou(bloc_map, y)
+                    ious.append(iou_score.detach().cpu().item())
+
+                avg_iou = np.mean(ious)
+                if avg_iou > best_iou:
+                    best_iou = avg_iou
+                    best_threshold = threshold
+
+                self.trainer.logger.experiment.add_scalar('avg_iou', avg_iou, i)
+                self.trainer.logger.experiment.add_scalar('threshold', threshold, i)
+            
+            # Log best iou and threshold
+            self.log('best_iou', best_iou)
+            self.log('best_threshold', best_threshold)
+
+            # Now, using best threshold, generate the binary localization maps for 
+            # all images in the test set and log/save them
+            for batch_idx, (x, y) in enumerate(test_dataloader):
+                x, y = x.to(self.device), y.to(self.device)
+                x_rec, M, colormaps = self.forward(x)
+                bloc_map = self.gen_bloc_map(M, best_threshold)
+
+                # Save the binary localization maps
+                bloc_map = bloc_map.detach().cpu()
+                bloc_map_grid = make_grid(bloc_map).float()
+                save_image(bloc_map_grid, f'{self.trainer.logger.log_dir}/batch{batch_idx}-blocmaps.png')
+                self.trainer.logger.experiment.add_image('blocmaps', bloc_map_grid.numpy(), batch_idx)
+
+                # Save the input images
+                x = x.detach().cpu()
+                x_grid = make_grid(x).float()
+                save_image(x_grid, f'{self.trainer.logger.log_dir}/batch{batch_idx}-input.png')
+                self.trainer.logger.experiment.add_image('input', x_grid.numpy(), batch_idx)
+
+                # Save teh target masks
+                y = y.detach().cpu()
+                y_grid = make_grid(y).float()
+                save_image(y_grid, f'{self.trainer.logger.log_dir}/batch{batch_idx}-targets.png')
+                self.trainer.logger.experiment.add_image('targets', y_grid.numpy(), batch_idx)
+            
     def forward(self, x):
         """
         Forward function which reconstructs input, and also returns attention, color and binary localization maps
@@ -272,57 +329,6 @@ class ExpVAE(pl.LightningModule):
         permute = [2,1,0]
         colormaps = colormaps[:, permute]
         return colormaps
-
-    def binary_loc_evaluation(self, batch):
-        x, ground_truth = batch
-        ground_truth = ground_truth.to(self.device)
-
-        # Compute attention maps
-        _, attmaps, _ = self.forward(x)
-
-        # Compute the ROC (fpr, tpr) and the thresholds
-        self.roc.update(attmaps, ground_truth)
-        # fpr, tpr, thresholds = roc(attmaps, ground_truth, pos_label=1)
-        # Get AUC ROC (AUROC) for this ROC curve and log its value
-        # auroc = auc(fpr, tpr)
-        # self.log('auroc', auroc, prog_bar=True)
-
-        # Get the best binary localization image by picking threshold with best IOU
-        # bloc_img, iou_, threshold = self.bloc_from_iou(attmaps, ground_truth, thresholds)
-
-        # Log iou, theshold
-        # self.log('best_iou', iou_)
-        # self.log('threshold', threshold)
-
-        # return bloc_img
-
-    def bloc_from_iou(self, M, target, thresholds, max_search=100):
-        """
-        Pick the best threshold based off of IOU score, and return the binary localization map, 
-        including IOU score and selected threshold
-            M - Attention map
-            target - Target mask
-            thresholds - Thresholds to search
-            max_search - How many thresholds we want to search at most
-        """
-        # Pick 100 evenly spaced thresholds to compute IOU for
-        step_size = int(len(thresholds)/max_search)
-        thresholds = thresholds[::step_size]
-
-        # Set variables for tracking best iou and thershold
-        best_iou = 0
-        sel_threshold = None
-
-        # Loop through thresholds, keep track of best iou binary localization map and threshold
-        for i, t in enumerate(thresholds):
-            m = self.gen_bloc_map(M, t)
-            iou_score = iou(m, target)
-            if iou_score > best_iou:
-                best_iou = iou_score
-                sel_threshold = t
-                best_bloc = m
-
-        return best_bloc, best_iou, sel_threshold
 
     def gen_bloc_map(self, M, threshold):
         # Generates a binary localizatino map given a threshold
