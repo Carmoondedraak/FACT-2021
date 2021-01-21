@@ -27,24 +27,25 @@ class VAE(nn.Module):
             # This part defines the encoder part of the VAE on images of (1*28*28)
             self.enc_main = nn.Sequential(
                 nn.Conv2d(1, 64, kernel_size=4, stride=2, padding=1), # 28 - 14
-                nn.LeakyReLU(),
+                nn.ReLU(),
                 nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1), # 14 - 7
-                nn.LeakyReLU(),
+                nn.ReLU(),
                 nn.Flatten(), # 7*7*128 = 6272
                 nn.Linear(6272, 1024),
-                nn.LeakyReLU()
+                nn.ReLU(),
             )
             # This part defines the decoder part of the VAE on images of (1*28*28)
             self.dec_vae = nn.Sequential(
                 nn.Linear(self.z_dim, 1024),
-                nn.LeakyReLU(),
+                nn.ReLU(),
                 nn.Linear(1024, 6272),
-                nn.LeakyReLU(),
+                nn.ReLU(),
                 Reshape((128, 7, 7)),
-                nn.LeakyReLU(),
+                nn.ReLU(),
                 nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1),
-                nn.LeakyReLU(),
-                nn.ConvTranspose2d(64, 1, kernel_size=4, stride=2, padding=1)
+                nn.ReLU(),
+                nn.ConvTranspose2d(64, 1, kernel_size=4, stride=2, padding=1),
+                nn.Sigmoid()
             )
             
             # ResNet encoder is saved in self.encoder, but only used for MVTEC dataset. Setting this to None
@@ -58,28 +59,33 @@ class VAE(nn.Module):
             # This part defines the encoder part of the VAE on images of (1*100*100)
             self.enc_main = nn.Sequential(
                 nn.Conv2d(1, 64, kernel_size=4, stride=2, padding=1), # (100 * 100) - (50 * 50)
-                nn.LeakyReLU(),
+                nn.ReLU(),
                 nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1), # (50 * 50) - (25 * 25)
-                nn.LeakyReLU(),
+                nn.ReLU(),
                 nn.Conv2d(128, 128, kernel_size=5, stride=2, padding=1), # (25 * 25) - (12 * 12)
-                nn.LeakyReLU(),
-                nn.Flatten(), # 12*12*128 = 18,432
-                nn.Linear(18432, 1024),
-                nn.LeakyReLU()
+                nn.ReLU(),
+                nn.Conv2d(128, 128, kernel_size=4, stride=2, padding=1), # (12 * 12) - (6 * 6)
+                nn.ReLU(),
+                nn.Flatten(), # 6*6*128 = 4,608
+                nn.Linear(4608, 1024),
+                nn.ReLU(),
             )
             # This part defines the decoder part of the VAE on images of (1*100*100)
             self.dec_vae = nn.Sequential(
                 nn.Linear(self.z_dim, 1024),
-                nn.LeakyReLU(),
-                nn.Linear(1024, 18432),
-                nn.LeakyReLU(),
-                Reshape((128, 12, 12)),
-                nn.LeakyReLU(),
+                nn.ReLU(),
+                nn.Linear(1024, 4608),
+                nn.ReLU(),
+                Reshape((128, 6, 6)),
+                nn.ReLU(),
+                nn.ConvTranspose2d(128, 128, kernel_size=4, stride=2, padding=1),
+                nn.ReLU(),
                 nn.ConvTranspose2d(128, 128, kernel_size=5, stride=2, padding=1),
-                nn.LeakyReLU(),
+                nn.ReLU(),
                 nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1),
-                nn.LeakyReLU(),
-                nn.ConvTranspose2d(64, 1, kernel_size=4, stride=2, padding=1)
+                nn.ReLU(),
+                nn.ConvTranspose2d(64, 1, kernel_size=4, stride=2, padding=1),
+                nn.Sigmoid()
             )
             
             # ResNet encoder is saved in self.encoder, but only used for MVTEC dataset. Setting this to None
@@ -207,7 +213,7 @@ class VAE(nn.Module):
             for i, (name, module) in enumerate(self.encoder.named_modules()):
                 if i == (self.layer_idx + 3):
                     activ, grad = module.layer_activ_out, module.layer_grad_out
-                    return activ, grad
+                    return grad, activ
         # The other models use nn.Sequential, so we can use the layer_idx directly
         else:
             activ, grad = self.enc_main[self.layer_idx].layer_activ_out, self.enc_main[self.layer_idx].layer_grad_out
