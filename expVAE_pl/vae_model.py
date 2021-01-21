@@ -125,7 +125,7 @@ class VAE(nn.Module):
         # Register these hooks to the correct module in the network (given by layer_idx)
         if self.encoder is not None:
             for i, (name, module) in enumerate(self.encoder.named_modules()):
-                if i == (self.layer_idx + 3):
+                if i == (self.layer_idx):
                     module.register_forward_hook(save_layer_activations)
         else:
             self.enc_main[layer_idx].register_forward_hook(save_layer_activations)
@@ -211,7 +211,7 @@ class VAE(nn.Module):
         # For the resnet model, we loop through the model to access the activations and gradients
         if self.encoder is not None:
             for i, (name, module) in enumerate(self.encoder.named_modules()):
-                if i == (self.layer_idx + 3):
+                if i == (self.layer_idx):
                     activ, grad = module.layer_activ_out, module.layer_grad_out
                     return grad, activ
         # The other models use nn.Sequential, so we can use the layer_idx directly
