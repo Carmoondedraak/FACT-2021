@@ -105,7 +105,9 @@ class Solver(BaseFactorVae):
             Implements the mechanism of selection of the attention
                 maps to use in the attention disentanglement loss
         """
-        return maps[0], maps[1]
+        #print(type(maps[0]), type(maps[0].detach().to(torch.device("cpu"))))
+        pairs = [(maps[i], maps[i+1]) for i in range(len(maps[:-1]))]
+        return pairs
 
     def train(self):
 
@@ -119,7 +121,6 @@ class Solver(BaseFactorVae):
         out = False
         while not out:
             for batch_idx, (x1, x2) in enumerate(self.data_loader):
-                #model.eval()
                 self.global_iter += 1
                 self.pbar.update(1)
 
@@ -136,10 +137,14 @@ class Solver(BaseFactorVae):
                 gcam.backward(mu, logvar, mu_avg, logvar_avg)
                 gcam_maps = gcam.generate()
 
-                #print(len(gcam_maps))
-                sel = self.select_attention_maps(gcam_maps)
-                att_loss = attention_disentanglement(sel[0], sel[1])
-                
+                selected = self.select_attention_maps(gcam_maps)
+                att_loss = 0
+                for (sel1, sel2) in selected:
+                    att_loss += attention_disentanglement(sel1, sel2)
+                #print("The total att_loss is {}".format(att_loss))
+                att_loss /= len(selected) # Averaging the loss accross all pairs of maps
+                #print("The average att_loss is {}".format(att_loss))
+
                 vae_loss = factorVae_loss + self.lambdaa*att_loss
                 self.optim_VAE.zero_grad()
                 vae_loss.backward(retain_graph=True)
