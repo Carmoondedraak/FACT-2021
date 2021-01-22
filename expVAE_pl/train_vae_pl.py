@@ -170,12 +170,6 @@ class ExpVAE(pl.LightningModule):
                 # Update the ROC with new predictions and ground truths
                 self.roc.update(attmaps, ground_truth)
 
-                # Save ground truth and input images
-                ground_truth = make_grid(ground_truth)
-                save_image(ground_truth.float(), f'{self.trainer.logger.log_dir}/batch{batch_idx}-targets.png')
-                input_imgs = make_grid(x)
-                save_image(input_imgs.float(), f'{self.trainer.logger.log_dir}/batch{batch_idx}-input.png')
-
     def test_epoch_end(self, outputs):
         """
         After going through the entire test set, we compute the final ROC curve accumulated overall
@@ -235,6 +229,7 @@ class ExpVAE(pl.LightningModule):
 
                 # Save the input images
                 x = x.detach().cpu()
+                x = self.trainer.datamodule.unnormalize_batch(x)
                 x_grid = make_grid(x).float()
                 save_image(x_grid, f'{self.trainer.logger.log_dir}/batch{batch_idx}-input.png')
                 self.trainer.logger.experiment.add_image('input', x_grid.numpy(), batch_idx)
