@@ -120,7 +120,7 @@ class MVTECDataModule(LightningDataModule):
         ])
 
         # List all available class names for images
-        self.class_names = ['bottle', 'cable', 'capsule', 'carpet', 'grid', 'hazelnut', 'leather'
+        self.class_names = ['bottle', 'cable', 'capsule', 'carpet', 'grid', 'hazelnut', 'leather',
                     'metal_nut', 'pill', 'screw', 'tile', 'toothbrush', 'transistor', 'wood', 'zipper']
 
         # Check if class name selected exists
@@ -155,14 +155,14 @@ class MVTECDataModule(LightningDataModule):
     # NOTE: For our purposes, we have no need for a separate validation and test set, so they are the exac same
     # For validation, we return two dataloaders. One for the class being trained on, and another of the "anomaly" class 
     def val_dataloader(self):
-        trained_digit_loader = DataLoader(self.val_set, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=True)
-        eval_digit_loader = DataLoader(self.eval_set, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=True)
+        trained_digit_loader = DataLoader(self.val_set, batch_size=self.batch_size, num_workers=self.num_workers)
+        eval_digit_loader = DataLoader(self.eval_set, batch_size=self.batch_size, num_workers=self.num_workers)
         return [trained_digit_loader, eval_digit_loader]
 
     # For testing, we return two dataloaders. One for the class being trained on, and another of the "anomaly" class 
     def test_dataloader(self):
-        trained_digit_loader = DataLoader(self.val_set, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=True)
-        eval_digit_loader = DataLoader(self.eval_set, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=True)
+        trained_digit_loader = DataLoader(self.val_set, batch_size=self.batch_size, num_workers=self.num_workers)
+        eval_digit_loader = DataLoader(self.eval_set, batch_size=self.batch_size, num_workers=self.num_workers)
         return [trained_digit_loader, eval_digit_loader]
 
     def unnormalize_batch(self, images):
