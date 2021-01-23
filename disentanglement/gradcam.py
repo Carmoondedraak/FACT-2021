@@ -27,12 +27,6 @@ class PropBase(object):
     def set_hook_func(self):
         raise NotImplementedError
 
-    # set the target class as one others as zero. use this vector for back prop
-    # def encode_one_hot(self, idx):
-    #     one_hot = torch.FloatTensor(1, self.n_class).zero_()
-    #     one_hot[0][idx] = 1.0
-    #     return one_hot
-
     # set the target class as one others as zero. use this vector for back prop added by Lezi
     def encode_one_hot_batch(self, z, mu, logvar, mu_avg, logvar_avg):
         one_hot_batch = torch.FloatTensor(z.size()).zero_()
@@ -67,6 +61,7 @@ class PropBase(object):
                         return value
         raise ValueError('invalid layer name: {}'.format(target_layer))
 
+"""
 class GradCAM(PropBase):
 
     def set_hook_func(self):
@@ -109,7 +104,7 @@ class GradCAM(PropBase):
         gcam = torch.abs(gcam)
 
         return gcam
-
+"""
 
 class GradCamDissen(PropBase):
     """
@@ -132,24 +127,19 @@ class GradCamDissen(PropBase):
             module[1].register_forward_hook(func_f)
 
     def forward(self, x):
-        #self.preds = self.model(x)
         self.image_size = x.size(-1)
         recon_batch, self.mu, self.logvar, self.z = self.model(x)
         return recon_batch, self.mu, self.logvar, self.z
 
-    # back prop the one_hot signal
-    def backward(self, mu, logvar, mu_avg, logvar_avg):
+    def backward(self, mu, logvar, mu_avg, logvar_avg, flag=2):
         self.model.zero_grad()
-        #z = self.model.reparameterize_eval(mu, logvar).cuda()
-        one_hot = self.encode_one_hot_batch(self.z, mu, logvar, mu_avg, logvar_avg)
+        one_hot = mu #self.encode_one_hot_batch(self.z, mu, logvar, mu_avg, logvar_avg)
 
-        if self.cuda:
-            one_hot = one_hot.cuda()
-        flag = 2
         if flag == 1:
             self.score_fc = torch.sum(F.relu(one_hot.cuda() * mu))
         else:
             self.score_fc = torch.sum(one_hot.cuda())
+
         self.score_fc.backward(gradient=one_hot, retain_graph=True)
 
     def normalize(self, grads):
@@ -157,7 +147,7 @@ class GradCamDissen(PropBase):
         return grads / l2_norm.item()
 
     def compute_gradient_weights(self):
-        #self.grads = self.normalize(self.grads.squeeze())
+        self.grads = self.normalize(self.grads)
         self.map_size = self.grads.size()[2:]
         self.weights = nn.AvgPool2d(self.map_size)(self.grads)
 
@@ -165,6 +155,7 @@ class GradCamDissen(PropBase):
         # get gradient
         self.grads = self.get_conv_outputs(
             self.outputs_backward, self.target_layer)
+
         # compute weithts based on the gradient
         self.compute_gradient_weights()
 
@@ -175,9 +166,11 @@ class GradCamDissen(PropBase):
         self.weights.volatile = False
         self.activiation = self.activiation[None, :, :, :, :]
         self.weights = self.weights[:, None, :, :, :]
+
         gcam = F.conv3d(self.activiation, (self.weights.cuda()), padding=0, groups=len(self.weights))
         gcam = gcam.squeeze(dim=0)
         gcam = F.upsample(gcam, (self.image_size, self.image_size), mode="bilinear")
         gcam = torch.abs(gcam)
 
         return gcam
+

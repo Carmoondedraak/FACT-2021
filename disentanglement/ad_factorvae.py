@@ -135,12 +135,12 @@ class Solver(BaseFactorVae):
                 factorVae_loss = vae_recon_loss + vae_kld + self.gamma*vae_tc_loss
                 # For attention disentanglement loss
                 gcam.backward(mu, logvar, mu_avg, logvar_avg)
-                gcam_maps = gcam.generate()
-
-                selected = self.select_attention_maps(gcam_maps)
                 att_loss = 0
-                for (sel1, sel2) in selected:
-                    att_loss += attention_disentanglement(sel1, sel2)
+                with torch.no_grad():
+                    gcam_maps = gcam.generate()
+                    selected = self.select_attention_maps(gcam_maps)
+                    for (sel1, sel2) in selected:
+                        att_loss += attention_disentanglement(sel1, sel2)
                 #print("The total att_loss is {}".format(att_loss))
                 att_loss /= len(selected) # Averaging the loss accross all pairs of maps
                 #print("The average att_loss is {}".format(att_loss))
