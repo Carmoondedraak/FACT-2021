@@ -15,6 +15,7 @@ For a list of all possible arguments, run the following command:
 ```
 python exp_vae_pl.py -h
 ```
+There are 3 datasets used, namely MNIST, UCSD Pedestrian and MVTec-AD. Each can be downloaded and extracted manually in the folder ```./Datasets/```. However, the dataset specified by argument ```--dataset``` will be downloaded and extracted automatically if it not present in the Datasets folder already.
 #### Training
 To train, run the script ```python exp_vae_pl.py```. By default, this will train and evaluate on the MNIST dataset for 100 epochs, with inlier digit 1 and outlier digit 7.
 Examples of training:
