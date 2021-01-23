@@ -119,38 +119,60 @@ class Tester(BaseFactorVae):
     def test(self):
         subdirs = [x[1] for x in os.walk(self.ckpt_dir)]
         subdirs = subdirs[0]
+        seeds = ['seed_1', 'seed_2']
         # To plot the disentanglement metric results
         fig1 = plt.figure(figsize=(9,4))
         ax1 = plt.subplot(1,1,1)
         last_scores = []
         for subdir in subdirs:
-            disent_vals = []
-            iters = []
-            #print(subdir)
-            if "la_1.0" in subdir:
-                path = os.path.join(self.ckpt_dir,subdir, "metrics.json")
-                iters, disent_vals, recon_loss = self.analyse_disentanglement_metric(path)
+            if "seed_1" in subdir:
+                idx0 = subdir.index('seed')
+                aver_disent, aver_recon, iters = [], [], []
+                for seed in seeds: 
+                    #print(subdir[:idx0]+seed)
+                    path = os.path.join(self.ckpt_dir, subdir[:idx0]+seed, "metrics.json")
+                    iters, disent_vals, recon_loss = self.analyse_disentanglement_metric(path)
+                    if len(aver_disent) == 0:
+                        aver_disent = np.zeros_like(disent_vals)
+                        aver_recon = np.zeros_like(recon_loss)
+                    aver_disent += disent_vals
+                    aver_recon += recon_loss
                 idx1 = subdir.index('_ga')
                 idx2 = subdir.index('_la')
                 idx3 = subdir.index('_iters')
-                last_scores.append((disent_vals[-1], recon_loss, int(subdir[idx1+4:idx2])))
-                ax1.plot(iters, disent_vals, label=subdir[idx1+1:idx3])
-        plt.ylim([0,1.1])
-        ax1.legend(loc = 'upper center', bbox_to_anchor=(0.5,1.15), ncol=3)
-        ax1.set_xlabel("iters")
-        ax1.set_ylabel("disentanglement metric")
-        mkdirs(os.path.join(self.ckpt_dir,'output/'))
-        fig1.savefig(self.ckpt_dir+'/output'+'/disent_res_abl.png')
+                aver_disent = aver_disent / len(seeds)
+                aver_recon = aver_recon / len(seeds)
+                last_scores.append((aver_disent[-1], aver_recon, int(subdir[idx1+4:idx2])))
+                ax1.plot(iters, aver_disent, label=subdir[idx1+1:idx3])
+            plt.ylim([0,1.1])
+            ax1.legend(loc = 'upper center', bbox_to_anchor=(0.5,1.15), ncol=3)
+            ax1.set_xlabel("iters")
+            ax1.set_ylabel("disentanglement metric")
+            mkdirs(os.path.join(self.ckpt_dir,'output/'))
+            fig1.savefig(self.ckpt_dir+'/output'+'/disent_res_abl.png')
         # To plot the training losses
         fig2, axs = plt.subplots(nrows=2, ncols=1, constrained_layout = True)
         for subdir in subdirs:
-            #print(subdir)
-            if "la_1.0" in subdir:
-                path = os.path.join(self.ckpt_dir,subdir, "metrics.json")
-                iters, recon_loss, tc_loss = self.analyse_train_metrics(path)
-                axs[0].plot(iters, recon_loss)
-                axs[1].plot(iters, tc_loss)
-
+            if "seed_1" in subdir:
+                idx0 = subdir.index('seed')
+                aver_recon, aver_tc, iters = [], [], []
+                for seed in seeds:
+                    #print(subdir[:idx0]+seed)
+                    path = os.path.join(self.ckpt_dir,subdir[:idx0]+seed, "metrics.json")
+                    iters, recon_loss, tc_loss = self.analyse_train_metrics(path)
+                    if len(aver_recon) == 0:
+                        aver_recon = np.zeros_like(recon_loss)
+                        aver_tc = np.zeros_like(tc_loss)
+                        aver_recon += recon_loss
+                        aver_tc += tc_loss
+                    aver_recon = aver_recon / len(seeds)
+                    idx1 = subdir.index('_ga')
+                    idx2 = subdir.index('_iters')
+                    aver_tc = aver_tc / len(seeds)
+                axs[0].plot(iters, aver_recon, label=subdir[idx1+1:idx2])
+                axs[1].plot(iters, aver_tc, label=subdir[idx1+1:idx2])
+        axs[0].legend(loc = 'upper center', bbox_to_anchor=(0.5,1.15), ncol=3)
+        axs[1].legend(loc = 'upper center', bbox_to_anchor=(0.5,1.15), ncol=3)
         axs[1].set_xlabel("iters")
         axs[0].set_ylabel("recon_loss")
         axs[1].set_ylabel("tc_loss")
@@ -237,6 +259,7 @@ class Tester(BaseFactorVae):
         fig.savefig(self.ckpt_dir+'/output'+'/figure8.png')
 
 
+
 def main():
     parser = argparse.ArgumentParser(description='Factor-VAE')
 
@@ -295,5 +318,7 @@ def main():
     tester.test()
     #print("Finished after {} mins.".format(str((time.time() - start) // 60)))
 
+
 if __name__ == '__main__':
     main()
+

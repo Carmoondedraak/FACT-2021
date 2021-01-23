@@ -342,10 +342,10 @@ class BaseFactorVae(ABC):
                 if verbose:
                     self.pbar.write("=> no checkpoint found")
                 return
-
+            ckpts = [str(ckpt.rstrip(".pth")) for ckpt in ckpts if "json" not in ckpt]
             ckpts = [int(ckpt) for ckpt in ckpts]
             ckpts.sort(reverse=True)
-            ckptname = str(ckpts[0])
+            ckptname = str(ckpts[0])+".pth"
 
         filepath = os.path.join(self.ckpt_dir, ckptname)
         if os.path.isfile(filepath):
