@@ -90,44 +90,66 @@ class MVTEC(Dataset):
 
 class MVTECDataModule(LightningDataModule):
     def __init__(self, root='./MVTEC_dataset', class_name='bottle', batch_size=16, num_workers=4):
-        self.dims = (3, 256, 256)
-        self.data_dir, self.batch_size, self.num_workers = root, batch_size, num_workers
 
-        self.ch_mu, self.ch_std = (0.5,0.5,0.5), (0.5,0.5,0.5)
-
-        self.unnormalize = UnNormalize(self.ch_mu, self.ch_std, n_channels=3)
-
-        # Training transforms, which include augmentation and normalization
-        self.transform = trforms.Compose([
-            trforms.Resize(self.dims[1:]),
-            trforms.RandomHorizontalFlip(),
-            trforms.RandomRotation(90),
-            trforms.ToTensor(),
-            trforms.Normalize(self.ch_mu, self.ch_std)
-        ])
-
-        # Transforms used on the target/mask images
-        self.target_transform = trforms.Compose([
-            trforms.Resize(self.dims[1:]),
-            ToTensor()
-        ])
-
-        # Transforms used on the eval/test set
-        self.test_transform = trforms.Compose([
-            trforms.Resize(self.dims[1:]),
-            trforms.ToTensor(),
-            trforms.Normalize(self.ch_mu, self.ch_std)
-        ])
 
         # List all available class names for images
         self.class_names = ['bottle', 'cable', 'capsule', 'carpet', 'grid', 'hazelnut', 'leather',
                     'metal_nut', 'pill', 'screw', 'tile', 'toothbrush', 'transistor', 'wood', 'zipper']
+
+        grayscale_classes = ['grid', 'screw', 'zipper']
 
         # Check if class name selected exists
         if class_name in self.class_names:
             self.class_name = class_name
         else:
             raise ValueError(f'Expected one of {self.class_names} classes but was given {class_name}')
+        
+        if class_name in grayscale_classes:
+            self.dims = (1, 256, 256)
+            self.ch_mu, self.ch_std = 0.5, 0.5
+            self.unnormalize = None
+
+            # Training transforms, which include augmentation and normalization
+            self.transform = trforms.Compose([
+                trforms.Resize(self.dims[1:]),
+                trforms.RandomHorizontalFlip(p=0.5),
+                trforms.RandomRotation(90),
+                trforms.ToTensor(),
+            ])
+
+            # Transforms used on the eval/test set
+            self.test_transform = trforms.Compose([
+                trforms.Resize(self.dims[1:]),
+                trforms.ToTensor(),
+            ])
+        else:
+            self.dims = (3, 256, 256)
+            self.ch_mu, self.ch_std = (0.5,0.5,0.5), (0.5,0.5,0.5)
+            self.unnormalize = UnNormalize(self.ch_mu, self.ch_std, n_channels=3)
+
+            # Training transforms, which include augmentation and normalization
+            self.transform = trforms.Compose([
+                trforms.Resize(self.dims[1:]),
+                trforms.RandomHorizontalFlip(p=0.5),
+                trforms.RandomRotation(90),
+                trforms.ToTensor(),
+                trforms.Normalize(self.ch_mu, self.ch_std)
+            ])
+
+            # Transforms used on the eval/test set
+            self.test_transform = trforms.Compose([
+                trforms.Resize(self.dims[1:]),
+                trforms.ToTensor(),
+                trforms.Normalize(self.ch_mu, self.ch_std)
+            ])
+
+        self.data_dir, self.batch_size, self.num_workers = root, batch_size, num_workers
+
+        # Transforms used on the target/mask images
+        self.target_transform = trforms.Compose([
+            trforms.Resize(self.dims[1:]),
+            ToTensor()
+        ])
         
         # URL for downloading the dataset
         self.url = 'ftp://guest:GU%2E205dldo@ftp.softronics.ch/mvtec_anomaly_detection/mvtec_anomaly_detection.tar.xz'
@@ -166,4 +188,7 @@ class MVTECDataModule(LightningDataModule):
         return [trained_digit_loader, eval_digit_loader]
 
     def unnormalize_batch(self, images):
-        return self.unnormalize(images)
+        if self.unnormalize is None:
+            return images
+        else:
+            return self.unnormalize(images)
