@@ -16,30 +16,12 @@ import torch.nn.functional as F
 from torchvision.utils import make_grid, save_image
 
 from utils import DataGather, mkdirs, grid2gif, BaseFactorVae
-from ops import recon_loss, kl_divergence, permute_dims, attention_disentanglement
+from ops import recon_loss, kl_divergence, permute_dims, attention_disentanglement, GradCamDissen
 from model import FactorVAE1, FactorVAE2, Discriminator
 from dataset import return_data
 
 import json
-from gradcam import GradCamDissen
 
-import re
-from pathlib import Path
-
-
-
-### Save attention maps  ### - TODO to use with the attetion maps
-def save_cam(image, filename, gcam):
-    gcam = gcam - np.min(gcam)
-    gcam = gcam / np.max(gcam)
-    h, w, d = image.shape
-    gcam = cv2.resize(gcam, (w, h))
-    gcam = cv2.applyColorMap(np.uint8(255 * gcam), cv2.COLORMAP_JET)
-    gcam = np.asarray(gcam, dtype=np.float) + \
-        np.asarray(image, dtype=np.float)
-    gcam = 255 * gcam / np.max(gcam)
-    gcam = np.uint8(gcam)
-    cv2.imwrite(filename, gcam)
 
 ### Define the FactorVAE disentanglement metric tester
 

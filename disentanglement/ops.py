@@ -45,6 +45,20 @@ def attention_disentanglement(att1, att2):
     return 2 * (numer / denomi)
 
 
+### - TODO to use with the attetion maps
+def save_cam(image, filename, gcam):
+    gcam = gcam - np.min(gcam)
+    gcam = gcam / np.max(gcam)
+    h, w, d = image.shape
+    gcam = cv2.resize(gcam, (w, h))
+    gcam = cv2.applyColorMap(np.uint8(255 * gcam), cv2.COLORMAP_JET)
+    gcam = np.asarray(gcam, dtype=np.float) + \
+        np.asarray(image, dtype=np.float)
+    gcam = 255 * gcam / np.max(gcam)
+    gcam = np.uint8(gcam)
+    cv2.imwrite(filename, gcam)
+
+
 ########### About GradCam used to compute the attention loss component of the AD-FactorVAE
 
 from collections import OrderedDict
