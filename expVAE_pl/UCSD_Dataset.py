@@ -87,13 +87,11 @@ class UCSDDataModule(pl.LightningDataModule):
 
         self.ch_mu, self.ch_std = 0.5, 0.5
 
-        # self.unnormalize = UnNormalize(self.ch_mu, self.ch_std, n_channels=1)
         self.unnormalize = None
 
         self.transform = trforms.Compose([
             trforms.Resize(self.dims[1:]),
             trforms.ToTensor(),
-            # trforms.Normalize(self.ch_mu, self.ch_std)
         ])
 
         self.target_transform = trforms.Compose([

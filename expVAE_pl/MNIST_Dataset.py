@@ -39,7 +39,6 @@ class OneClassMNISTDataModule(pl.LightningDataModule):
 
         self.transform = trforms.Compose([
             trforms.ToTensor(),
-            # trforms.Normalize(self.ch_mu, self.ch_std)
         ])
 
         # URL used for downloading the dataset
