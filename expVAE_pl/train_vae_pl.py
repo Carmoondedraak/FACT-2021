@@ -15,13 +15,7 @@ from torchvision.utils import make_grid, save_image
 from pytorch_lightning.metrics.functional.classification import roc, auc, iou
 from pytorch_lightning import metrics
 
-# Set seeds for reproducibility
-torch.backends.cudnn.enabled = True
-torch.backends.cudnn.benchmark = True
-init_seed = 1
-torch.manual_seed(init_seed)
-torch.cuda.manual_seed(init_seed)
-np.random.seed(init_seed)
+
 
 class ExpVAE(pl.LightningModule):
     
@@ -58,11 +52,11 @@ class ExpVAE(pl.LightningModule):
         # Unpack and define some variables for calculating the loss
         p, q, z, mu, log_var = stats
         n_channels = x.shape[1]
+        
         # For grayscale, we use summed BCE for reconstruction loss
         if n_channels == 1:
             # L_rec = F.binary_cross_entropy_with_logits(recon_x, x, reduction='sum')
             L_rec = F.binary_cross_entropy(x_rec, x, reduction='sum')
-            # L_rec = F.binary_cross_entropy(recon_x, x, reduction='sum')
         # For color, we use mean MSE for reconstruction loss)
         elif n_channels == 3:
             L_rec = F.mse_loss(x_rec, x, reduction='mean')
@@ -181,7 +175,7 @@ class ExpVAE(pl.LightningModule):
             fpr, idx = torch.sort(fpr, descending=False)
             tpr, thresholds = tpr[idx], thresholds[idx]
             auroc = auc(fpr, tpr)
-            self.log('auroc', auroc)
+            self.log('auroc_test', auroc)
 
             # Divide thresholds from ROC into 100 equally separated thresholds
             step_size = int(len(thresholds)/100)
@@ -192,7 +186,6 @@ class ExpVAE(pl.LightningModule):
             best_threshold = -1
             # For each threshold, compute IOU for whole test set
             for i, threshold in enumerate(thresholds):
-                # TODO: Check if this is the correct dataloader
                 test_dataloader = self.trainer.datamodule.test_dataloader()[1]
                 ious = []
                 for batch_idx, (x, y) in enumerate(test_dataloader):
@@ -276,9 +269,13 @@ class ExpVAE(pl.LightningModule):
         # We can now compute the attention maps M and create the color maps
         dz_da = dz_da / (torch.sqrt(torch.mean(torch.square(dz_da))) + 1e-5)
         alpha = F.avg_pool2d(dz_da, kernel_size=dz_da.shape[2:])
-        M = torch.sum(alpha*A, dim=1)
-        M = F.interpolate(M.unsqueeze(0), size=self.hparams.im_shape[1:], mode='bilinear', align_corners=False).permute(1,0,2,3)
+        A, alpha = A, alpha
+
+        A, alpha = A.unsqueeze(0), alpha.unsqueeze(1)
+        M = F.conv3d(A, (alpha), padding=0, groups=len(alpha)).squeeze(0).squeeze(1)
+        M = F.interpolate(M.unsqueeze(1), size=self.hparams.im_shape[1:], mode='bilinear', align_corners=False)
         M = torch.abs(M)
+
         colormaps = self.create_colormap(x, M)
 
         # Zero out the gradients again, and put model back into train mode
@@ -332,7 +329,10 @@ class ExpVAE(pl.LightningModule):
 
 
 class SampleAttentionCallback(pl.Callback):
-
+    """
+    This callback is responsible for sampling attention maps, reconstructed images and original images
+    during training. During testing, this is simply done in the test loop
+    """
     def __init__(self, batch_size, every_n_epoch=5):
         """
         PyTorch Lightning callback which handles saving samples throughout training
@@ -390,13 +390,6 @@ class SampleAttentionCallback(pl.Callback):
                 save_image(targets_grid.float(), f'{trainer.logger.log_dir}/{self.epoch}-targets.png')
                 trainer.logger.experiment.add_image('targets', targets_grid.numpy(), self.epoch)
 
-            # Save binary localization maps for UCSD and MVTEC datasets
-            # if 'ucsd' in dataset_name or 'mvtec' in dataset_name:
-            #     blocmaps = pl_module.binary_loc_evaluation((imgs, targets))
-            #     blocmaps = make_grid(blocmaps.detach().cpu())
-            #     save_image(blocmaps.float(), f'{trainer.logger.log_dir}/{self.epoch}-blocmap.png')
-            #     trainer.logger.experiment.add_image('blocmaps', blocmaps.numpy(), self.epoch)
-
         # Save image reconstruction, which is the first dataloader
         elif output_type == 'rec':
             imgs, _ = next(iter(trainer.val_dataloaders[loader_idx]))
@@ -414,6 +407,14 @@ class SampleAttentionCallback(pl.Callback):
 
 # Main function which initializes the datasets, models, and preps them for training or evaluation
 def exp_vae(args):
+    # Set seeds for reproducibility
+    torch.backends.cudnn.enabled = True
+    torch.backends.cudnn.benchmark = True
+    init_seed = args.init_seed
+    torch.manual_seed(init_seed)
+    torch.cuda.manual_seed(init_seed)
+    np.random.seed(init_seed)
+
     # Set working directory to project directory
     set_work_directory()
 
@@ -451,11 +452,12 @@ def exp_vae(args):
         callbacks.append(att_map_cb)
 
     # Create checkpoint for saving the model, based on the validation loss
-    # monitor = 'val_loss' if args.dataset.lower() == 'mnist'else 'val_loss/dataloader_idx_0'
-    monitor = 'val_loss'
+    monitor = 'val_loss' if args.dataset.lower() == 'mnist'else 'auroc'
+    mode = 'min' if args.dataset.lower() == 'mnist' else 'max'
+    # monitor = 'val_loss'
     checkpoint_cb = ModelCheckpoint(
         monitor=monitor,
-        mode='min',
+        mode=mode,
     )
 
     # Create PyTorch lightning trainer
@@ -543,6 +545,8 @@ if __name__ == '__main__':
     # Train or test?
     parser.add_argument('--eval', default=False, type=bool, help='Train or only test the model')
     parser.add_argument('--model_version', default=None, type=int, help='Which version of the model to continue training')
+
+    parser.add_argument('--init_seed', default=1, type=int, help='What seed to use for numpy and pytorch')
     
     args = parser.parse_args()
 
