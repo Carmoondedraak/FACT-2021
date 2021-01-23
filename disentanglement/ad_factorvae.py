@@ -6,7 +6,7 @@ from tqdm import tqdm
 
 import argparse
 import numpy as np
-from utils import str2bool 
+from utils import str2bool
 import time
 
 import torch
@@ -15,12 +15,11 @@ import torch.nn.functional as F
 from torchvision.utils import make_grid, save_image
 
 from utils import DataGather, mkdirs, grid2gif, BaseFactorVae
-from ops import recon_loss, kl_divergence, permute_dims, attention_disentanglement
+from ops import recon_loss, kl_divergence, permute_dims, attention_disentanglement, GradCamDissen
 from model import FactorVAE1, FactorVAE2, Discriminator
 from dataset import return_data
 
 import json
-from gradcam import GradCamDissen
 
 
 class Solver(BaseFactorVae):
