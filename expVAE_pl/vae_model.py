@@ -15,6 +15,10 @@ class Reshape(nn.Module):
         return x
 
 class VAE(nn.Module):
+    """
+    This class organizes three different encoder and decoder network architectures
+    for three different image sizes for training variational autoencoders. 
+    """
     def __init__(self, layer_idx, z_dim, im_size):
         super(VAE, self).__init__()
 
@@ -94,10 +98,21 @@ class VAE(nn.Module):
 
             encoder_output_dim = 1024
             
-        # Encoder/decoder for MVTEC
+        # Encoder/decoder for MVTEC color images
         elif im_size == (3, 256, 256):
             self.encoder = resnet18_encoder(first_conv=True, maxpool1=True)
             self.decoder = resnet18_decoder(self.z_dim, im_size[1], first_conv=True, maxpool1=True)
+
+            encoder_output_dim = 512
+        
+        # Encoder/decoder for MVTEC grayscale images
+        elif im_size == (1, 256, 256):
+            self.encoder = resnet18_encoder(first_conv=True, maxpool1=True)
+            self.decoder = resnet18_decoder(self.z_dim, im_size[1], first_conv=True, maxpool1=True)
+
+            # Change encoder first conv and decoder last conv to deal with grayscale instead of color
+            self.encoder.conv1 = nn.Conv2d(1, 64, kernel_size=(7,7), stride=(2,2), padding=(3,3), bias=False)
+            self.decoder.conv1 = nn.Conv2d(64, 1, kernel_size=(3,3), stride=(1,1), padding=(1,1), bias=False)
 
             encoder_output_dim = 512
 
@@ -124,9 +139,12 @@ class VAE(nn.Module):
 
         # Register these hooks to the correct module in the network (given by layer_idx)
         if self.encoder is not None:
-            for i, (name, module) in enumerate(self.encoder.named_modules()):
-                if i == (self.layer_idx):
-                    module.register_forward_hook(save_layer_activations)
+            conv_counter = 0
+            for name, module in self.encoder.named_modules():
+                if 'conv' in name:
+                    if conv_counter == self.layer_idx:
+                        module.register_forward_hook(save_layer_activations)
+                    conv_counter += 1
         else:
             self.enc_main[layer_idx].register_forward_hook(save_layer_activations)
 
@@ -210,10 +228,13 @@ class VAE(nn.Module):
         """
         # For the resnet model, we loop through the model to access the activations and gradients
         if self.encoder is not None:
-            for i, (name, module) in enumerate(self.encoder.named_modules()):
-                if i == (self.layer_idx):
-                    activ, grad = module.layer_activ_out, module.layer_grad_out
-                    return grad, activ
+            conv_counter = 0
+            for name, module in self.encoder.named_modules():
+                if 'conv' in name:
+                    if conv_counter == self.layer_idx:
+                        activ, grad = module.layer_activ_out, module.layer_grad_out
+                        return grad, activ
+                    conv_counter += 1
         # The other models use nn.Sequential, so we can use the layer_idx directly
         else:
             activ, grad = self.enc_main[self.layer_idx].layer_activ_out, self.enc_main[self.layer_idx].layer_grad_out
