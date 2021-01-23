@@ -1,4 +1,5 @@
 """ops.py"""
+from __future__ import print_function
 
 import torch
 import torch.nn.functional as F
@@ -46,7 +47,6 @@ def attention_disentanglement(att1, att2):
 
 ########### About GradCam used to compute the attention loss component of the AD-FactorVAE
 
-from __future__ import print_function
 from collections import OrderedDict
 
 import cv2

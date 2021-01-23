@@ -235,6 +235,53 @@ class Solver(BaseFactorVae):
         self.pbar.close()
 
 
+def experiment1(args, seed):
+    """ Ablation study comparing Vanilla FactorVAE
+            with AD-FactorVAE
+    """
+    gammas = [10, 20, 30, 40]
+    lambdas = [1.0]
+    for la in lambdas:
+        args.lambdaa = la
+        for ga in gammas:
+            args.gamma = ga
+            args.name = "disent_ga_{}_la_{}_iters_{}_seed_{}/".format(args.gamma, args.lambdaa, int(args.max_iter), seed)
+            solver = Solver(args)
+            solver.train()
+            del solver
+
+
+def experiment2(args, seed):
+    """ Ablation study comparing the influence of gamma
+            hyperparameter on AD-FactorVAE performance
+    """
+    gammas = [5, 15, 25, 35]
+    lambdas = [1.0]
+    for la in lambdas:
+        args.lambdaa = la
+        for ga in gammas:
+            args.gamma = ga
+            args.name = "disent_ga_{}_la_{}_iters_{}_seed_{}/".format(args.gamma, args.lambdaa, int(args.max_iter), seed)
+            solver = Solver(args)
+            solver.train()
+            del solver
+
+
+def experiment3(args, seed):
+    """ Ablation study comparing the influence of lambda
+            hyperparameter on AD-FactorVAE performance
+    """
+    gammas = [10, 20, 30, 40]
+    lambdas = [0.5, 1.5]
+    for la in lambdas:
+        args.lambdaa = la
+        for ga in gammas:
+            args.gamma = ga
+            args.name = "disent_ga_{}_la_{}_iters_{}_seed_{}/".format(args.gamma, args.lambdaa, int(args.max_iter), seed)
+            solver = Solver(args)
+            solver.train()
+            del solver
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Factor-VAE')
@@ -277,7 +324,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    seeds = [1,2]
+    seeds = [1]
     start = time.time()
     for seed in seeds:
         # To achieve reproducible results with sequential runs
@@ -289,17 +336,6 @@ if __name__ == "__main__":
         torch.cuda.manual_seed(init_seed)
         np.random.seed(init_seed)
 
-
-        gammas = [10,20,30,40,50]  # [5,10,15,20,25,30,35,40,45,50]
-        lambdas = [1.0]  # [0.33, 0.67, 1.0]
-        for la in lambdas:
-            args.lambdaa = la
-            for ga in gammas:
-                args.gamma = ga
-                args.name = "disent_ga_{}_la_{}_iters_{}_seed_{}/".format(args.gamma, args.lambdaa, int(args.max_iter), seed)
-                solver = Solver(args)
-                solver.train()
-                del solver
+        experiment1(args, seed)
 
     print("Finished after {} mins.".format(str((time.time() - start) // 60)))
-

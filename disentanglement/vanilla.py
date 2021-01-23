@@ -185,6 +185,18 @@ class Solver(BaseFactorVae):
         self.pbar.close()
 
 
+def experiment1(args, seed):
+    """ Ablation study comparing Vanilla FactorVAE
+            with AD-FactorVAE
+    """
+    gammas = [10, 20, 30, 40]
+    for ga in gammas:
+        args.gamma = ga
+        args.name = "disent_ga_{}_iters_{}_seed_{}/".format(args.gamma, int(args.max_iter), seed)
+        solver = Solver(args)
+        solver.train()
+        del solver
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Factor-VAE')
@@ -226,7 +238,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    seeds = [1,2]
+    seeds = [1, 2]
     start = time.time()
     for seed in seeds:
         # To achieve reproducible results with sequential runs
@@ -238,14 +250,6 @@ if __name__ == "__main__":
         torch.cuda.manual_seed(init_seed)
         np.random.seed(init_seed)
 
-
-        gammas = [10,20,30,40,50]
-        for ga in gammas:
-            args.gamma = ga
-            args.name = "disent_ga_{}_la_{}_iters_{}_seed_{}/".format(args.gamma, 1.0, int(args.max_iter), seed)
-            solver = Solver(args)
-            solver.train()
-            del solver
+        experiment1(args, seed)
 
     print("Finished after {} mins.".format(str((time.time() - start) // 60)))
-
