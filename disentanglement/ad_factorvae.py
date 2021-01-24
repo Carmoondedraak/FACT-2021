@@ -43,7 +43,7 @@ class Solver(BaseFactorVae):
         self.z_dim = args.z_dim
         self.gamma = args.gamma
 
-        self.lambdaa = args.lambdaa # TODO analyse the effect of this parameter
+        self.lambdaa = args.lambdaa
 
         self.lr_VAE = args.lr_VAE
         self.beta1_VAE = args.beta1_VAE
@@ -71,7 +71,7 @@ class Solver(BaseFactorVae):
                                   betas=(self.beta1_D, self.beta2_D))
 
         self.nets = [self.VAE, self.D]
-        
+
         # Visdom
         self.viz_on = args.viz_on
         self.win_id = dict(D_z='win_D_z', recon='win_recon', kld='win_kld', acc='win_acc')
@@ -79,7 +79,7 @@ class Solver(BaseFactorVae):
         self.image_gather = DataGather('true', 'recon')
         if self.viz_on:
             self.viz_port = args.viz_port
-            self.viz = visdom.Visdom(log_to_filename='./logging.log', offline=True)  # server='http://188.140.46.6' ,port=self.viz_port)
+            self.viz = visdom.Visdom(log_to_filename='./logging.log', offline=True)
             self.viz_ll_iter = args.viz_ll_iter
             self.viz_la_iter = args.viz_la_iter
             self.viz_ra_iter = args.viz_ra_iter

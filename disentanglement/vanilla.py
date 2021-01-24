@@ -71,7 +71,7 @@ class Solver(BaseFactorVae):
         self.image_gather = DataGather('true', 'recon')
         if self.viz_on:
             self.viz_port = args.viz_port
-            self.viz = visdom.Visdom(log_to_filename='./logging.log', offline=True)  # server='http://188.140.46.6' ,port=self.viz_port)
+            self.viz = visdom.Visdom(log_to_filename='./logging.log', offline=True)
             self.viz_ll_iter = args.viz_ll_iter
             self.viz_la_iter = args.viz_la_iter
             self.viz_ra_iter = args.viz_ra_iter
@@ -141,41 +141,11 @@ class Solver(BaseFactorVae):
                 if self.global_iter%self.print_iter == 0:
                     self.pbar.write('[{}] vae_recon_loss:{:.3f} vae_kld:{:.3f} vae_tc_loss:{:.3f} D_tc_loss:{:.3f}'.format(
                         self.global_iter, vae_recon_loss.item(), vae_kld.item(), vae_tc_loss.item(), D_tc_loss.item()))
-                
+
                 if self.global_iter%self.ckpt_save_iter == 0:
                     self.save_checkpoint(str(self.global_iter)+".pth")
                     self.save_metrics(metrics)
                     metrics = []
-
-                """
-                if self.viz_on and (self.global_iter%self.viz_ll_iter == 0):
-                    soft_D_z = F.softmax(D_z, 1)[:, :1].detach()
-                    soft_D_z_pperm = F.softmax(D_z_pperm, 1)[:, :1].detach()
-                    D_acc = ((soft_D_z >= 0.5).sum() + (soft_D_z_pperm < 0.5).sum()).float()
-                    D_acc /= 2*self.batch_size
-                    self.line_gather.insert(iter=self.global_iter,
-                                            soft_D_z=soft_D_z.mean().item(),
-                                            soft_D_z_pperm=soft_D_z_pperm.mean().item(),
-                                            recon=vae_recon_loss.item(),
-                                            kld=vae_kld.item(),
-                                            acc=D_acc.item())
-
-                if self.viz_on and (self.global_iter%self.viz_la_iter == 0):
-                    self.visualize_line()
-                    self.line_gather.flush()
-
-                if self.viz_on and (self.global_iter%self.viz_ra_iter == 0):
-                    self.image_gather.insert(true=x_true1.data.cpu(),
-                                             recon=F.sigmoid(x_recon).data.cpu())
-                    self.visualize_recon()
-                    self.image_gather.flush()
-
-                if self.viz_on and (self.global_iter%self.viz_ta_iter == 0):
-                    if self.dataset.lower() == '3dchairs':
-                        self.visualize_traverse(limit=2, inter=0.5)
-                    else:
-                        self.visualize_traverse(limit=3, inter=2/3)
-                """
 
                 if self.global_iter >= self.max_iter:
                     out = True

@@ -70,23 +70,22 @@ class Tester(BaseFactorVae):
                                   betas=(self.beta1_D, self.beta2_D))
 
         self.nets = [self.VAE, self.D]
-        
+
         # Visdom
-        """
         self.viz_on = args.viz_on
         self.win_id = dict(D_z='win_D_z', recon='win_recon', kld='win_kld', acc='win_acc')
         self.line_gather = DataGather('iter', 'soft_D_z', 'soft_D_z_pperm', 'recon', 'kld', 'acc')
         self.image_gather = DataGather('true', 'recon')
         if self.viz_on:
             self.viz_port = args.viz_port
-            self.viz = visdom.Visdom(log_to_filename='./logging.log', offline=True)  # server='http://188.140.46.6' ,port=self.viz_port)
+            self.viz = visdom.Visdom(log_to_filename='./logging.log', offline=True)
             self.viz_ll_iter = args.viz_ll_iter
             self.viz_la_iter = args.viz_la_iter
             self.viz_ra_iter = args.viz_ra_iter
             self.viz_ta_iter = args.viz_ta_iter
             if not self.viz.win_exists(env=self.name+'/lines', win=self.win_id['D_z']):
                 self.viz_init()
-        """
+        
 
         # Checkpoint
         self.ckpt_dir = args.ckpt_dir
@@ -181,8 +180,8 @@ class Tester(BaseFactorVae):
                 D_loss.append(di["D_loss"])
                 recon.append(di["recon_loss"])
                 tc.append(di["tc_loss"])
-        
-        return iters, recon, tc     
+
+        return iters, recon, tc 
 
     def analyse_disentanglement_metric(self, json_path):
         """ It receives the path to the json file and plots the proposed metric results  """
@@ -199,8 +198,8 @@ class Tester(BaseFactorVae):
                 scores.append(di["metric_score"])
             else:
                 final_recon_loss = di["recon_loss"]
-        
-        return iters, scores, final_recon_loss   
+
+        return iters, scores, final_recon_loss
 
     def get_comparison_plot(self, last_scores):
         """ It aims to reproduce the results observed in Figure 8 (Just the AD-FactorVAE) """
@@ -298,7 +297,7 @@ def main():
     tester = Tester(args)
     start = time.time()
     tester.test()
-    #print("Finished after {} mins.".format(str((time.time() - start) // 60)))
+    print("Finished after {} seconds.".format(str(time.time() - start)))
 
 
 if __name__ == '__main__':
