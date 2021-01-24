@@ -5,7 +5,7 @@ TA: Christos Athanasiadis
 
 | Name           | Email                            |
 |----------------|:-------------------------:       |
-| Andre Jesus    | andre.fialhojesus@student.uva.nl |
+| André Jesus    | andre.fialhojesus@student.uva.nl |
 | Carmen Veenker | carmen.veenker@student.uva.nl    |
 | Kevin Waller   | kevin.waller@student.uva.nl      |
 | Qiao Ren       | qiao.ren@student.uva.nl          |
