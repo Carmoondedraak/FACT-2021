@@ -279,7 +279,9 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    seeds = [1]
+    seeds = [1, 2]
+    args.max_iter = 150000
+    args.ckpt_save_iter = 50000
     start = time.time()
     for seed in seeds:
         # To achieve reproducible results with sequential runs
