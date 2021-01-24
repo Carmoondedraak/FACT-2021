@@ -185,8 +185,10 @@ class Tester(BaseFactorVae):
 
     def analyse_disentanglement_metric(self, json_path):
         """ It receives the path to the json file and plots the proposed metric results  """
-        iters = []
-        scores = []
+        iters, scores = [], []
+        # Adding initial measure
+        iters.append(0)
+        scores.append(0)
         final_recon_loss = -1
 
         lst = json.load(open(json_path, mode="r"))
@@ -207,9 +209,10 @@ class Tester(BaseFactorVae):
         model1_reconErr = [20, 30,42, 58, 60, 111]
         model1_value = [1,2,4,6,8,16]
 
-        model2_distang = [0.7, 0.75,0.77,0.78,0.825]
-        model2_reconErr = [37, 38,39,40,40]
-        model2_value = [100, 10,20,30,40]
+        # The values were updated from trained vanilla folder
+        model2_distang = [0.804, 0.823, 0.704, 0.786, 0.762]  #[0.7, 0.75,0.77,0.78,0.825]
+        model2_reconErr = [54.00, 34.18, 64.92, 40.40, 92.01]  # [37, 38,39,40,40]
+        model2_value = [10,20,30,40,50]  # [100,10,20,30,40]
 
         model3_distang = [x[0] for x in last_scores] #[0.9,0.89,0.895, 0.91]
         model3_reconErr = [x[1] for x in last_scores] #[38, 39.5, 40,40]
@@ -231,7 +234,7 @@ class Tester(BaseFactorVae):
 
         plt.rc('axes', labelsize=8)
         ax.legend(loc="upper right" )
-        ax.set_title('Reconstruction error plotted against disentanglement metric ', size = 18)
+        ax.set_title('Reconstruction error against disentanglement metric ', size = 13)
         ax.set_xlabel('reconstruction error', size = 15)
         ax.set_ylabel('disentanglement metric', size = 15)
         plt.xlim([0, 150])
