@@ -104,7 +104,6 @@ class Solver(BaseFactorVae):
             Implements the mechanism of selection of the attention
                 maps to use in the attention disentanglement loss
         """
-        #print(type(maps[0]), type(maps[0].detach().to(torch.device("cpu"))))
         pairs = [(maps[i], maps[i+1]) for i in range(len(maps[:-1]))]
         return pairs
 
@@ -115,7 +114,7 @@ class Solver(BaseFactorVae):
 
         ones = torch.ones(self.batch_size, dtype=torch.long, device=self.device)
         zeros = torch.zeros(self.batch_size, dtype=torch.long, device=self.device)
-        mu_avg, logvar_avg, test_index = 0, 1, 0
+        mu_avg, logvar_avg = 0, 1
         metrics = []
         out = False
         while not out:
@@ -123,13 +122,16 @@ class Solver(BaseFactorVae):
                 self.global_iter += 1
                 self.pbar.update(1)
 
+                self.optim_VAE.step()
+                self.optim_D.step()
+
                 x1 = x1.to(self.device)
                 x1_rec, mu, logvar, z = gcam.forward(x1)
                 # For Standard FactorVAE loss
                 vae_recon_loss = recon_loss(x1, x1_rec)
                 vae_kld = kl_divergence(mu, logvar)
                 D_z = self.D(z)
-                vae_tc_loss = (D_z[:, :1] - D_z[:, 1:]).mean() # TODO where is the log in the equation ??
+                vae_tc_loss = (D_z[:, :1] - D_z[:, 1:]).mean()
 
                 factorVae_loss = vae_recon_loss + vae_kld + self.gamma*vae_tc_loss
                 # For attention disentanglement loss
@@ -140,14 +142,12 @@ class Solver(BaseFactorVae):
                     selected = self.select_attention_maps(gcam_maps)
                     for (sel1, sel2) in selected:
                         att_loss += attention_disentanglement(sel1, sel2)
-                #print("The total att_loss is {}".format(att_loss))
-                att_loss /= len(selected) # Averaging the loss accross all pairs of maps
-                #print("The average att_loss is {}".format(att_loss))
+                att_loss /= len(selected)  # Averaging the loss accross all pairs of maps
 
                 vae_loss = factorVae_loss + self.lambdaa*att_loss
                 self.optim_VAE.zero_grad()
                 vae_loss.backward(retain_graph=True)
-                self.optim_VAE.step()
+                #self.optim_VAE.step()
 
                 x2 = x2.to(self.device)
                 z_prime = self.VAE(x2, no_dec=True)
@@ -157,76 +157,31 @@ class Solver(BaseFactorVae):
 
                 self.optim_D.zero_grad()
                 D_tc_loss.backward()
-                self.optim_D.step()
+                #self.optim_D.step()
 
                 # Saving the training metrics
                 if self.global_iter % 100 == 0:
-                    metrics.append({'its':self.global_iter, 'vae_loss': vae_loss.detach().to(torch.device("cpu")).item(), 'D_loss': D_tc_loss.detach().to(torch.device("cpu")).item(), 'recon_loss':vae_recon_loss.detach().to(torch.device("cpu")).item(), 'tc_loss': vae_tc_loss.detach().to(torch.device("cpu")).item()})
+                    metrics.append({'its':self.global_iter,
+                        'vae_loss': vae_loss.detach().to(torch.device("cpu")).item(),
+                        'D_loss': D_tc_loss.detach().to(torch.device("cpu")).item(),
+                        'recon_loss':vae_recon_loss.detach().to(torch.device("cpu")).item(),
+                        'tc_loss': vae_tc_loss.detach().to(torch.device("cpu")).item()})
 
                 # Saving the disentanglement metrics results
                 if self.global_iter % 1500 == 0:
                     score = self.disentanglement_metric() 
                     metrics.append({'its':self.global_iter, 'metric_score': score})
-                    self.net_mode(train=True) #To continue the training again
+                    self.net_mode(train=True)  # To continue the training again
 
-                if self.global_iter%self.print_iter == 0:
+                if self.global_iter % self.print_iter == 0:
                     self.pbar.write('[{}] vae_recon_loss:{:.3f} vae_kld:{:.3f} vae_tc_loss:{:.3f} D_tc_loss:{:.3f}'.format(
                         self.global_iter, vae_recon_loss.item(), vae_kld.item(), vae_tc_loss.item(), D_tc_loss.item()))
-                
-                if self.global_iter%self.ckpt_save_iter == 0:
+
+                if self.global_iter % self.ckpt_save_iter == 0:
                     self.save_checkpoint(str(self.global_iter)+".pth")
                     self.save_metrics(metrics)
                     metrics = []
-                """
-                ### For writing the generated images organized in grids 
-                if self.viz_on and (self.global_iter%self.viz_ll_iter == 0):
-                    soft_D_z = F.softmax(D_z, 1)[:, :1].detach()
-                    soft_D_z_pperm = F.softmax(D_z_pperm, 1)[:, :1].detach()
-                    D_acc = ((soft_D_z >= 0.5).sum() + (soft_D_z_pperm < 0.5).sum()).float()
-                    D_acc /= 2*self.batch_size
-                    self.line_gather.insert(iter=self.global_iter,
-                                            soft_D_z=soft_D_z.mean().item(),
-                                            soft_D_z_pperm=soft_D_z_pperm.mean().item(),
-                                            recon=vae_recon_loss.item(),
-                                            kld=vae_kld.item(),
-                                            acc=D_acc.item())
 
-                if self.viz_on and (self.global_iter%self.viz_la_iter == 0):
-                    self.visualize_line()
-                    self.line_gather.flush()
-
-                if self.viz_on and (self.global_iter%self.viz_ra_iter == 0):
-                    self.image_gather.insert(true=x_true1.data.cpu(),
-                                             recon=F.sigmoid(x_recon).data.cpu())
-                    self.visualize_recon()
-                    self.image_gather.flush()
-
-                if self.viz_on and (self.global_iter%self.viz_ta_iter == 0):
-                    if self.dataset.lower() == '3dchairs':
-                        self.visualize_traverse(limit=2, inter=0.5)
-                    else:
-                        self.visualize_traverse(limit=3, inter=2/3)
-                """               
-                """
-                ## Visualize and save attention maps  ##
-                x1 = x.repeat(1, 3, 1, 1)
-                for i in range(x1.size(0)):
-                    raw_image = x1[i] * 255.0
-                    ndarr = raw_image.permute(1, 2, 0).cpu().byte().numpy()
-                    im = Image.fromarray(ndarr.astype(np.uint8))
-                    im_path = args.result_dir
-                    if not os.path.exists(im_path):
-                        os.mkdir(im_path)
-                    im.save(os.path.join(im_path,
-                                     "{}-{}-origin.png".format(test_index, str(one_class))))
-
-                    file_path = os.path.join(im_path,
-                                         "{}-{}-attmap.png".format(test_index, str(one_class)))
-                    r_im = np.asarray(im)
-                    save_cam(r_im, file_path, gcam_map[i].squeeze().cpu().data.numpy())
-                    test_index += 1
-
-                """
                 if self.global_iter >= self.max_iter:
                     out = True
                     break

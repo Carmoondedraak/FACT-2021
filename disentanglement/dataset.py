@@ -80,7 +80,7 @@ def return_data(args):
         data = np.load(root, encoding='latin1')
         factors = torch.from_numpy(data['latents_classes'])
         data = torch.from_numpy(data['imgs']).unsqueeze(1).float()
-        train_kwargs = {'data_tensor':data, 'factors': factors}
+        train_kwargs = {'data_tensor': data, 'factors': factors}
         dset = CustomTensorDataset
     else:
         raise NotImplementedError
