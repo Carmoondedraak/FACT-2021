@@ -194,7 +194,7 @@ def experiment1(args, seed):
     """ Ablation study comparing Vanilla FactorVAE
             with AD-FactorVAE
     """
-    gammas = [10, 20, 30, 40]
+    gammas = [10, 20, 30, 40, 50]
     lambdas = [1.0]
     for la in lambdas:
         args.lambdaa = la
@@ -210,7 +210,7 @@ def experiment2(args, seed):
     """ Ablation study comparing the influence of gamma
             hyperparameter on AD-FactorVAE performance
     """
-    gammas = [5, 15, 25, 35]
+    gammas = [5, 15, 25, 35, 45]
     lambdas = [1.0]
     for la in lambdas:
         args.lambdaa = la
@@ -226,7 +226,7 @@ def experiment3(args, seed):
     """ Ablation study comparing the influence of lambda
             hyperparameter on AD-FactorVAE performance
     """
-    gammas = [10, 20, 30, 40]
+    gammas = [10, 20, 30, 40, 50]
     lambdas = [0.5, 1.5]
     for la in lambdas:
         args.lambdaa = la
@@ -293,6 +293,6 @@ if __name__ == "__main__":
         torch.cuda.manual_seed(init_seed)
         np.random.seed(init_seed)
 
-        experiment1(args, seed)
+        experiment3(args, seed)
 
     print("Finished after {} mins.".format(str((time.time() - start) // 60)))

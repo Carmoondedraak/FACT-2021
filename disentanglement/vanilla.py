@@ -103,6 +103,9 @@ class Solver(BaseFactorVae):
                 self.global_iter += 1
                 self.pbar.update(1)
 
+                self.optim_VAE.step()
+                self.optim_D.step()
+
                 x_true1 = x_true1.to(self.device)
                 x_recon, mu, logvar, z = self.VAE(x_true1)
                 vae_recon_loss = recon_loss(x_true1, x_recon)
@@ -115,7 +118,7 @@ class Solver(BaseFactorVae):
 
                 self.optim_VAE.zero_grad()
                 vae_loss.backward(retain_graph=True)
-                self.optim_VAE.step()
+                #self.optim_VAE.step()
 
                 x_true2 = x_true2.to(self.device)
                 z_prime = self.VAE(x_true2, no_dec=True)
@@ -125,12 +128,16 @@ class Solver(BaseFactorVae):
 
                 self.optim_D.zero_grad()
                 D_tc_loss.backward()
-                self.optim_D.step()
+                #self.optim_D.step()
 
 
                 # Saving the training metrics
                 if self.global_iter % 100 == 0:
-                    metrics.append({'its':self.global_iter, 'vae_loss': vae_loss.detach().to(torch.device("cpu")).item(), 'D_loss': D_tc_loss.detach().to(torch.device("cpu")).item(), 'recon_loss':vae_recon_loss.detach().to(torch.device("cpu")).item(), 'tc_loss': vae_tc_loss.detach().to(torch.device("cpu")).item()})
+                    metrics.append({'its':self.global_iter,
+                        'vae_loss': vae_loss.detach().to(torch.device("cpu")).item(),
+                        'D_loss': D_tc_loss.detach().to(torch.device("cpu")).item(),
+                        'recon_loss':vae_recon_loss.detach().to(torch.device("cpu")).item(),
+                        'tc_loss': vae_tc_loss.detach().to(torch.device("cpu")).item()})
 
                 # Saving the disentanglement metrics results
                 if self.global_iter % 1500 == 0:
@@ -159,7 +166,7 @@ def experiment1(args, seed):
     """ Ablation study comparing Vanilla FactorVAE
             with AD-FactorVAE
     """
-    gammas = [10, 20, 30, 40]
+    gammas = [10, 20, 30, 40, 50]
     for ga in gammas:
         args.gamma = ga
         args.name = "disent_ga_{}_iters_{}_seed_{}/".format(args.gamma, int(args.max_iter), seed)
