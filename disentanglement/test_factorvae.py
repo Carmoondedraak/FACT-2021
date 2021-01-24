@@ -4,244 +4,15 @@ import torch
 import os
 import numpy as np
 
-from tqdm import tqdm
-import visdom
 from matplotlib import pyplot as plt
 
 from utils import str2bool
 import time
 
-import torch.optim as optim
-import torch.nn.functional as F
-from torchvision.utils import make_grid, save_image
-
-from utils import DataGather, mkdirs, grid2gif, BaseFactorVae
-from ops import recon_loss, kl_divergence, permute_dims, attention_disentanglement, GradCamDissen
-from model import FactorVAE1, FactorVAE2, Discriminator
-from dataset import return_data
+from utils import mkdirs
 
 import json
 
-
-### Define the FactorVAE disentanglement metric tester
-"""
-class Tester(BaseFactorVae):
-    def __init__(self, args):
-        # Misc
-        use_cuda = args.cuda and torch.cuda.is_available()
-        self.device = 'cuda' if use_cuda else 'cpu'
-        self.name = args.name
-        self.max_iter = int(args.max_iter)
-        self.print_iter = args.print_iter
-        self.global_iter = 0
-        self.pbar = tqdm(total=self.max_iter)
-
-        # Data
-        self.dset_dir = args.dset_dir
-        self.dataset = args.dataset
-        self.batch_size = args.batch_size
-        self.data_loader, self.data = return_data(args)
-
-        # Networks & Optimizers
-        self.z_dim = args.z_dim
-        self.gamma = args.gamma
-
-        self.lambdaa = args.lambdaa
-
-        self.lr_VAE = args.lr_VAE
-        self.beta1_VAE = args.beta1_VAE
-        self.beta2_VAE = args.beta2_VAE
-
-        self.lr_D = args.lr_D
-        self.beta1_D = args.beta1_D
-        self.beta2_D = args.beta2_D
-
-        if args.dataset == 'dsprites':
-            self.VAE = FactorVAE1(self.z_dim).to(self.device)
-            self.nc = 1
-        else:
-            self.VAE = FactorVAE2(self.z_dim).to(self.device)
-            self.nc = 3
-        self.optim_VAE = optim.Adam(self.VAE.parameters(), lr=self.lr_VAE,
-                                    betas=(self.beta1_VAE, self.beta2_VAE))
-
-        self.D = Discriminator(self.z_dim).to(self.device)
-        self.optim_D = optim.Adam(self.D.parameters(), lr=self.lr_D,
-                                  betas=(self.beta1_D, self.beta2_D))
-
-        self.nets = [self.VAE, self.D]
-
-        # Visdom
-        self.viz_on = args.viz_on
-        self.win_id = dict(D_z='win_D_z', recon='win_recon', kld='win_kld', acc='win_acc')
-        self.line_gather = DataGather('iter', 'soft_D_z', 'soft_D_z_pperm', 'recon', 'kld', 'acc')
-        self.image_gather = DataGather('true', 'recon')
-        if self.viz_on:
-            self.viz_port = args.viz_port
-            self.viz = visdom.Visdom(log_to_filename='./logging.log', offline=True)
-            self.viz_ll_iter = args.viz_ll_iter
-            self.viz_la_iter = args.viz_la_iter
-            self.viz_ra_iter = args.viz_ra_iter
-            self.viz_ta_iter = args.viz_ta_iter
-            if not self.viz.win_exists(env=self.name+'/lines', win=self.win_id['D_z']):
-                self.viz_init()
-        
-
-        # Checkpoint
-        self.ckpt_dir = args.ckpt_dir
-        self.ckpt_save_iter = args.ckpt_save_iter
-        mkdirs(self.ckpt_dir)
-
-        # Output(latent traverse GIF)
-        self.output_dir = os.path.join(args.output_dir, args.name)
-        self.output_save = args.output_save
-        mkdirs(self.output_dir)
-
-    def test(self):
-        subdirs = [x[1] for x in os.walk(self.ckpt_dir)]
-        subdirs = subdirs[0]
-        seeds = ['seed_1', 'seed_2']
-        # To plot the disentanglement metric results
-        fig1 = plt.figure(figsize=(9,4))
-        ax1 = plt.subplot(1,1,1)
-        last_scores = []
-        for subdir in subdirs:
-            if "seed_1" in subdir:
-                idx0 = subdir.index('seed')
-                aver_disent, aver_recon, iters = [], [], []
-                for seed in seeds: 
-                    #print(subdir[:idx0]+seed)
-                    path = os.path.join(self.ckpt_dir, subdir[:idx0]+seed, "metrics.json")
-                    iters, disent_vals, recon_loss = self.analyse_disentanglement_metric(path)
-                    if len(aver_disent) == 0:
-                        aver_disent = np.zeros_like(disent_vals)
-                        aver_recon = np.zeros_like(recon_loss)
-                    aver_disent += disent_vals
-                    aver_recon += recon_loss
-                idx1 = subdir.index('_ga')
-                idx2 = subdir.index('_la')
-                idx3 = subdir.index('_iters')
-                aver_disent = aver_disent / len(seeds)
-                aver_recon = aver_recon / len(seeds)
-                last_scores.append((aver_disent[-1], aver_recon, int(subdir[idx1+4:idx2])))
-                ax1.plot(iters, aver_disent, label=subdir[idx1+1:idx3])
-            plt.ylim([0,1.1])
-            ax1.legend(loc = 'upper center', bbox_to_anchor=(0.5,1.15), ncol=3)
-            ax1.set_xlabel("iters")
-            ax1.set_ylabel("disentanglement metric")
-            mkdirs(os.path.join(self.ckpt_dir,'output/'))
-            fig1.savefig(self.ckpt_dir+'/output'+'/disent_res_abl.png')
-        # To plot the training losses
-        fig2, axs = plt.subplots(nrows=2, ncols=1, constrained_layout = True)
-        for subdir in subdirs:
-            if "seed_1" in subdir:
-                idx0 = subdir.index('seed')
-                aver_recon, aver_tc, iters = [], [], []
-                for seed in seeds:
-                    #print(subdir[:idx0]+seed)
-                    path = os.path.join(self.ckpt_dir,subdir[:idx0]+seed, "metrics.json")
-                    iters, recon_loss, tc_loss = self.analyse_train_metrics(path)
-                    if len(aver_recon) == 0:
-                        aver_recon = np.zeros_like(recon_loss)
-                        aver_tc = np.zeros_like(tc_loss)
-                        aver_recon += recon_loss
-                        aver_tc += tc_loss
-                    aver_recon = aver_recon / len(seeds)
-                    idx1 = subdir.index('_ga')
-                    idx2 = subdir.index('_iters')
-                    aver_tc = aver_tc / len(seeds)
-                axs[0].plot(iters, aver_recon, label=subdir[idx1+1:idx2])
-                axs[1].plot(iters, aver_tc, label=subdir[idx1+1:idx2])
-        axs[0].legend(loc = 'upper center', bbox_to_anchor=(0.5,1.15), ncol=3)
-        axs[1].legend(loc = 'upper center', bbox_to_anchor=(0.5,1.15), ncol=3)
-        axs[1].set_xlabel("iters")
-        axs[0].set_ylabel("recon_loss")
-        axs[1].set_ylabel("tc_loss")
-        mkdirs(os.path.join(self.ckpt_dir,'output/'))
-        fig2.savefig(self.ckpt_dir+'/output'+'/disent_train_metrics_abl.png')
-        # To plot the trade-off between disentanglement metric and reconstruction loss
-        self.get_comparison_plot(last_scores)
-
-    def analyse_train_metrics(self, json_path):
-        # It receives the path to the json file with the metrics and plots them
-        iters = []
-        vae_loss = []
-        D_loss = []
-        recon = []
-        tc = []
-
-        lst = json.load(open(json_path, mode="r"))
-        for di in lst:
-            assert isinstance(di, dict), "Got unexpected variable type"
-
-            if di.get("vae_loss") is not None:
-                iters.append(di.get("its"))
-                vae_loss.append(di["vae_loss"])
-                D_loss.append(di["D_loss"])
-                recon.append(di["recon_loss"])
-                tc.append(di["tc_loss"])
-
-        return iters, recon, tc 
-
-    def analyse_disentanglement_metric(self, json_path):
-        # It receives the path to the json file and plots the proposed metric results
-        iters, scores = [], []
-        # Adding initial measure
-        iters.append(0)
-        scores.append(0)
-        final_recon_loss = -1
-
-        lst = json.load(open(json_path, mode="r"))
-        for di in lst:
-            assert isinstance(di, dict), "Got unexpected variable type"
-
-            if di.get("metric_score") is not None:
-                iters.append(di["its"])
-                scores.append(di["metric_score"])
-            else:
-                final_recon_loss = di["recon_loss"]
-
-        return iters, scores, final_recon_loss
-
-    def get_comparison_plot(self, last_scores):
-        # It aims to reproduce the results observed in Figure 8 (Just the AD-FactorVAE)
-        model1_distang = [0.69, 0.685, 0.73,0.70,0.625, 0.68]
-        model1_reconErr = [20, 30,42, 58, 60, 111]
-        model1_value = [1,2,4,6,8,16]
-
-        # The values were updated from trained vanilla folder
-        model2_distang = [0.804, 0.823, 0.704, 0.786, 0.762]  #[0.7, 0.75,0.77,0.78,0.825]
-        model2_reconErr = [54.00, 34.18, 64.92, 40.40, 92.01]  # [37, 38,39,40,40]
-        model2_value = [10,20,30,40,50]  # [100,10,20,30,40]
-
-        model3_distang = [x[0] for x in last_scores] #[0.9,0.89,0.895, 0.91]
-        model3_reconErr = [x[1] for x in last_scores] #[38, 39.5, 40,40]
-        model3_value = [x[2] for x in last_scores] #[10,20,30,40]
-
-        fig, ax = plt.subplots()
-
-        scatter = ax.scatter(model1_reconErr, model1_distang, marker="o", c='b', label='beta VAE')
-        for i, txt in enumerate(model1_value):
-            ax.annotate(txt, (model1_reconErr[i], model1_distang[i]), size=12)
-
-        scatter = ax.scatter(model2_reconErr, model2_distang, marker="o", c='g', label='factor VAE')
-        for i, txt in enumerate(model2_value):
-            ax.annotate(txt, (model2_reconErr[i], model2_distang[i]), size=12)
-
-        scatter = ax.scatter(model3_reconErr, model3_distang, marker="o", c='r', label='AD factor VAE')
-        for i, txt in enumerate(model3_value):
-            ax.annotate(txt, (model3_reconErr[i], model3_distang[i]), size=12)
-
-        plt.rc('axes', labelsize=8)
-        ax.legend(loc="upper right" )
-        ax.set_title('Reconstruction error against disentanglement metric ', size = 13)
-        ax.set_xlabel('reconstruction error', size = 15)
-        ax.set_ylabel('disentanglement metric', size = 15)
-        plt.xlim([0, 150])
-        plt.ylim([0.3, 1])
-        plt.grid(color='r', linestyle=':', linewidth=0.5)
-        fig.savefig(self.ckpt_dir+'/output'+'/figure8.png')
-"""
 
 def analyse_disentanglement_metric(json_path):
     """ It receives the path to the json file and plots the proposed metric results  """
@@ -332,7 +103,7 @@ def plot_disentanglemet_metric(ckpt_dir, seeds):
             aver_recon = aver_recon / len(seeds)
             last_scores.append((aver_disent[-1], aver_recon, int(subdir[idx1+4:idx2])))
             ax1.plot(iters, aver_disent, label=subdir[idx1+1:idx3])
-        plt.ylim([0,1.1])
+        plt.ylim([0, 1.1])
         ax1.legend(loc='upper center', bbox_to_anchor=(0.5, 1.15), ncol=3)
         ax1.set_xlabel("iters")
         ax1.set_ylabel("disentanglement metric")
@@ -340,7 +111,7 @@ def plot_disentanglemet_metric(ckpt_dir, seeds):
         fig1.savefig(ckpt_dir+'/output'+'/disent_res_abl.png')
 
     # To plot the trade-off between disentanglement metric and reconstruction loss
-    get_comparison_plot(last_scores)
+    get_comparison_plot(ckpt_dir, last_scores)
 
 
 def analyse_train_metrics(json_path):
@@ -451,10 +222,7 @@ def main():
     torch.cuda.manual_seed(init_seed)
     np.random.seed(init_seed)
 
-    
-    #tester = Tester(args)
     start = time.time()
-    #tester.test()
 
     seeds = ['seed_1', 'seed_2']
     plot_training_loss(args.ckpt_dir, seeds)
@@ -465,4 +233,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
