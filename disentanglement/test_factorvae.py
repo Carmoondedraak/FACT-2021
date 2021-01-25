@@ -69,7 +69,7 @@ def get_comparison_plot(ckpt_dir, last_scores):
     fig.savefig(ckpt_dir+'/output'+'/figure8.png')
 
 
-def plot_disentanglemet_metric(ckpt_dir, seeds):
+def plot_disentanglemet_metric(ckpt_dir, seeds, vanilla):
     """ Given the root folder it extracts and plots the disentanglement metric """
     subdirs = [x[1] for x in os.walk(ckpt_dir)]
     subdirs = subdirs[0]
@@ -104,8 +104,9 @@ def plot_disentanglemet_metric(ckpt_dir, seeds):
         mkdirs(os.path.join(ckpt_dir, 'output/'))
         fig1.savefig(ckpt_dir+'/output'+'/disent_res_abl.png')
 
-    # To plot the trade-off between disentanglement metric and reconstruction loss
-    get_comparison_plot(ckpt_dir, last_scores)
+    if not vanilla:
+        # To plot the trade-off between disentanglement metric and reconstruction loss
+        get_comparison_plot(ckpt_dir, last_scores)
 
 
 def analyse_train_metrics(json_path):
@@ -220,7 +221,7 @@ def main():
 
     seeds = ['seed_1', 'seed_2']
     plot_training_loss(args.ckpt_dir, seeds)
-    #plot_disentanglemet_metric(args.ckpt_dir, seeds)
+    #plot_disentanglemet_metric(args.ckpt_dir, seeds, vanilla=True)
 
     print("Finished after {} seconds.".format(str(time.time() - start)))
 
