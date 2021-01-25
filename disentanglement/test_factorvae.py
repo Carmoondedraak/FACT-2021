@@ -21,6 +21,7 @@ def analyse_disentanglement_metric(json_path):
         assert isinstance(di, dict), "Got unexpected variable type"
 
         if di.get("metric_score") is not None:
+            #if di.get("its") <=150000:
             iters.append(di["its"])
             scores.append(di["metric_score"])
         else:

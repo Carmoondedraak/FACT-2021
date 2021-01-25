@@ -1,4 +1,8 @@
-torch>=1.2.0
+pytorch_lightning==1.1.5
+pytorch-lightning-bolts==0.3.0
+numpy>=1.16.4
+torch>=1.7.1
+torchvision>=0.8.2
 tqdm>=4.0
 opencv-python>= 4.5.1.48
 visdom>=1.16.2
