@@ -1,16 +1,10 @@
 import argparse
 import torch
-
 import os
 import numpy as np
-
 from matplotlib import pyplot as plt
-
-from utils import str2bool
+from .utils import str2bool, mkdirs
 import time
-
-from utils import mkdirs
-
 import json
 
 

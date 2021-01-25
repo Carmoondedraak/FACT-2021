@@ -59,9 +59,9 @@ import torch.optim as optim
 import torch.nn.functional as F
 from torchvision.utils import make_grid, save_image
 
-from ops import recon_loss, kl_divergence, permute_dims
-from model import FactorVAE1, FactorVAE2, Discriminator
-from dataset import return_data
+from .ops import recon_loss, kl_divergence, permute_dims
+from .model import FactorVAE1, FactorVAE2, Discriminator
+from .dataset import return_data
 
 import numpy as np
 import json
