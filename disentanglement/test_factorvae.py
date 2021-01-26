@@ -17,6 +17,8 @@ from tqdm import tqdm
 import visdom
 
 import torch.optim as optim
+import torch.nn.functional as F
+from torchvision.utils import make_grid, save_image
 
 from utils import DataGather, BaseFactorVae
 from ops import recon_loss, kl_divergence, permute_dims, attention_disentanglement, GradCamDissen
@@ -63,6 +65,7 @@ class Tester(BaseFactorVae):
         self.optim_D = optim.Adam(self.D.parameters(), lr=self.lr_D,
                                   betas=(self.beta1_D, self.beta2_D))
         self.nets = [self.VAE, self.D]
+
         # Visdom
         self.viz_on = args.viz_on
         self.win_id = dict(D_z='win_D_z', recon='win_recon', kld='win_kld', acc='win_acc')
@@ -82,10 +85,91 @@ class Tester(BaseFactorVae):
         self.ckpt_dir = args.ckpt_dir
         self.ckpt_save_iter = args.ckpt_save_iter
         mkdirs(self.ckpt_dir)
+        if args.ckpt_load:
+            self.load_checkpoint(args.ckpt_load)
+
         # Output(latent traverse GIF)
         self.output_dir = os.path.join(args.output_dir, args.name)
         self.output_save = args.output_save
-        mkdirs(self.output_dir)
+        if self.output_save:
+            mkdirs(self.output_dir)
+
+    def generate_figure_rows(self, shape='square', n_samples=5, limit=3, inter=2/3, loc=-1):
+        self.net_mode(train=False)
+
+        decoder = self.VAE.decode
+        encoder = self.VAE.encode
+        #interpolation = torch.arange(-limit, limit+0.1, inter)
+
+        fixed_idx = {'square': (87040,332800),
+                    'ellipse': (332800,578560),
+                    'heart': (578560,737280)}[shape]
+        """
+        fixed_idx1 = 87040 # square
+        fixed_idx2 = 332800 # ellipse
+        fixed_idx3 = 578560 # heart
+        """
+        
+        s, e  = fixed_idx
+        useful_samples_idx = torch.tensor([i for i in range(s,e,1)], dtype=torch.float) #np.where(factors[:, fixed_k] == fixed_value)[0]
+        #print("The number of useful samples are", len(useful_samples_idx))
+        random_idx = torch.multinomial(useful_samples_idx, n_samples) #np.random.choice(useful_samples_idx, num_examples_per_vote)
+        sampled_imgs = self.data[random_idx][0]
+        #sampled_imgs = sampled_imgs.to(self.device)#.unsqueeze(0)
+        #mus = encoder(sampled_imgs)[:, :self.z_dim]
+
+        fixed_img = self.data_loader.dataset.__getitem__(fixed_idx[0])[0]
+        fixed_img = fixed_img.to(self.device).unsqueeze(0)
+        fixed_img_z = encoder(fixed_img)[:, :self.z_dim]
+        Z = {shape: fixed_img_z}
+        """
+        Z = {shape: mus}
+
+        gifs, samples = [], []
+        for key in Z:
+            z_ori = Z[key]
+            c = z_ori.clone()
+            sample = F.sigmoid(decoder(c)).data
+            samples.append(sample)
+            gifs.append(sample)
+
+            samples = torch.cat(samples, dim=0).cpu()
+            title = '{}_latent_traversal(iter:{})'.format(key, self.global_iter)
+            self.viz.images(samples, env=self.name+'/traverse',
+                            opts=dict(title=title), nrow=1)#len(interpolation))
+
+        """
+        gifs = []
+        for key in Z:
+            z_ori = Z[key]
+            samples = []
+            for row in range(self.z_dim):
+                if loc != -1 and row != loc:
+                    continue
+                z = z_ori.clone()
+                #for val in interpolation:
+                #z[:, row] = val
+                sample = F.sigmoid(decoder(z)).data
+                samples.append(sample)
+                gifs.append(sample)
+            samples = torch.cat(samples, dim=0).cpu()
+            title = '{}_latent_traversal(iter:{})'.format(key, self.global_iter)
+            self.viz.images(samples, env=self.name+'/traverse',
+                            opts=dict(title=title), nrow=1)#len(interpolation))
+
+        if self.output_save:
+            output_dir = os.path.join(self.output_dir, str(self.global_iter))
+            mkdirs(output_dir)
+            gifs = torch.cat(gifs)
+            gifs = gifs.view(len(Z), n_samples, 1, self.nc, 64, 64).transpose(1, 2) #len(interpolation), self.nc, 64, 64).transpose(1, 2)
+            for i, key in enumerate(Z.keys()):
+                for j in [0]: #j, val in enumerate(interpolation):
+                    save_image(tensor=gifs[i][j].cpu(),
+                               filename=os.path.join(output_dir, '{}_{}.jpg'.format(key, j)),
+                               nrow=self.z_dim, pad_value=1)
+
+                #grid2gif(str(os.path.join(output_dir, key+'*.jpg')),
+                #         str(os.path.join(output_dir, key+'.gif')), delay=10)
 
     def generate_attention_maps(self, shape='squares'):
         """
@@ -324,8 +408,8 @@ def main():
 
     parser.add_argument('--print_iter', default=500, type=int, help='print losses iter')
 
-    parser.add_argument('--ckpt_dir', default='experiments', type=str, help='checkpoint directory')
-    parser.add_argument('--ckpt_load', default=None, type=str, help='checkpoint name to load')
+    parser.add_argument('--ckpt_dir', default='', type=str, help='checkpoint directory')
+    parser.add_argument('--ckpt_load', default='100000.pth', type=str, help='checkpoint name to load')
     parser.add_argument('--ckpt_save_iter', default=10000, type=int, help='checkpoint save iter')
 
     parser.add_argument('--output_dir', default='outputs', type=str, help='output directory')
@@ -349,8 +433,9 @@ def main():
     seeds = ['seed_1', 'seed_2']
     #plot_training_loss(args.ckpt_dir, seeds)
     #plot_disentanglemet_metric(args.ckpt_dir, seeds)
-    t = Tester()
-    t.generate_attention_maps()
+    t = Tester(args)
+    t.generate_figure_rows('heart', n_samples=10, limit=3, inter=2/3)
+    #t.generate_attention_maps()
 
     print("Finished after {} seconds.".format(str(time.time() - start)))
 
