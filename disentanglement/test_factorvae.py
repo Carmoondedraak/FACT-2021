@@ -123,16 +123,17 @@ def analyse_train_metrics(json_path):
         assert isinstance(di, dict), "Got unexpected variable type"
 
         if di.get("vae_loss") is not None:
-            iters.append(di.get("its"))
-            vae_loss.append(di["vae_loss"])
-            D_loss.append(di["D_loss"])
-            recon.append(di["recon_loss"])
-            tc.append(di["tc_loss"])
+            if di.get("its") <= 150000:
+                iters.append(di["its"])
+                vae_loss.append(di["vae_loss"])
+                D_loss.append(di["D_loss"])
+                recon.append(di["recon_loss"])
+                tc.append(di["tc_loss"])
 
     return iters, recon, tc
 
 
-def plot_training_loss(ckpt_dir, seeds):
+def plot_training_loss(ckpt_dir, seeds, detail):
     """ Given the root folder it extracts and plots the tc_loss and recon_loss over the training """
     subdirs = [x[1] for x in os.walk(ckpt_dir)]
     subdirs = subdirs[0]
@@ -149,16 +150,19 @@ def plot_training_loss(ckpt_dir, seeds):
                 if len(aver_recon) == 0:
                     aver_recon = np.zeros_like(recon_loss)
                     aver_tc = np.zeros_like(tc_loss)
-                    aver_recon += recon_loss
-                    aver_tc += tc_loss
-                aver_recon = aver_recon / len(seeds)
-                idx1 = subdir.index('_ga')
-                idx2 = subdir.index('_iters')
-                aver_tc = aver_tc / len(seeds)
+                aver_recon += recon_loss
+                aver_tc += tc_loss
+            aver_recon = aver_recon / len(seeds)
+            idx1 = subdir.index('_ga')
+            idx2 = subdir.index('_la')#'_iters')
+            aver_tc = aver_tc / len(seeds)
             axs[0].plot(iters, aver_recon, label=subdir[idx1+1:idx2])
             axs[1].plot(iters, aver_tc, label=subdir[idx1+1:idx2])
-    axs[0].legend(loc='upper center', bbox_to_anchor=(0.5, 1.15), ncol=3)
-    axs[1].legend(loc='upper center', bbox_to_anchor=(0.5, 1.15), ncol=3)
+    axs[0].legend(loc='upper center', bbox_to_anchor=(0.5, 1.15), ncol=5)
+    axs[1].legend(loc='upper center', bbox_to_anchor=(0.5, 1.15), ncol=5)
+    if detail:
+        axs[0].set_ylim([0, 150])
+        axs[1].set_ylim([-0.3, 0.7])
     axs[1].set_xlabel("iters")
     axs[0].set_ylabel("recon_loss")
     axs[1].set_ylabel("tc_loss")
