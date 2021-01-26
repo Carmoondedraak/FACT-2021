@@ -77,6 +77,36 @@ class Tester(BaseFactorVae):
         self.output_save = args.output_save
         mkdirs(self.output_dir)
 
+    def generate_attention_maps(self, shape='squares'):
+        """
+        if self.viz_on and (self.global_iter%self.viz_ll_iter == 0):
+            soft_D_z = F.softmax(D_z, 1)[:, :1].detach()
+            soft_D_z_pperm = F.softmax(D_z_pperm, 1)[:, :1].detach()
+            D_acc = ((soft_D_z >= 0.5).sum() + (soft_D_z_pperm < 0.5).sum()).float()
+            D_acc /= 2*self.batch_size
+            self.line_gather.insert(iter=self.global_iter,
+                                    soft_D_z=soft_D_z.mean().item(),
+                                    soft_D_z_pperm=soft_D_z_pperm.mean().item(),
+                                    recon=vae_recon_loss.item(),
+                                    kld=vae_kld.item(),
+                                    acc=D_acc.item())
+
+        if self.viz_on and (self.global_iter%self.viz_la_iter == 0):
+            self.visualize_line()
+            self.line_gather.flush()
+
+        if self.viz_on and (self.global_iter%self.viz_ra_iter == 0):
+            self.image_gather.insert(true=x_true1.data.cpu(),
+                                        recon=F.sigmoid(x_recon).data.cpu())
+            self.visualize_recon()
+            self.image_gather.flush()
+        """
+        # if self.viz_on and (self.global_iter%self.viz_ta_iter == 0):
+        if self.dataset.lower() == '3dchairs':
+            self.visualize_traverse(limit=2, inter=0.5)
+        else:
+            self.visualize_traverse(limit=3, inter=2/3)
+
 
 def analyse_disentanglement_metric(json_path):
     """ It receives the path to the json file and plots the proposed metric results  """
@@ -271,7 +301,7 @@ def main():
     parser.add_argument('--beta2_D', default=0.9, type=float, help='beta2 parameter of the Adam optimizer for the discriminator')
 
     parser.add_argument('--dset_dir', default='data', type=str, help='dataset directory')
-    parser.add_argument('--dataset', default='CelebA', type=str, help='dataset name')
+    parser.add_argument('--dataset', default='dsprites', type=str, help='dataset name')
     parser.add_argument('--image_size', default=64, type=int, help='image size. now only (64,64) is supported')
     parser.add_argument('--num_workers', default=2, type=int, help='dataloader num_workers')
 
@@ -307,8 +337,10 @@ def main():
     start = time.time()
 
     seeds = ['seed_1', 'seed_2']
-    plot_training_loss(args.ckpt_dir, seeds)
+    #plot_training_loss(args.ckpt_dir, seeds)
     #plot_disentanglemet_metric(args.ckpt_dir, seeds)
+    t = Tester()
+    t.generate_attention_maps()
 
     print("Finished after {} seconds.".format(str(time.time() - start)))
 
