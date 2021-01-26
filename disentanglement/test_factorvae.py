@@ -27,6 +27,7 @@ def analyse_disentanglement_metric(json_path):
         assert isinstance(di, dict), "Got unexpected variable type"
 
         if di.get("metric_score") is not None:
+            #if di.get("its") <= 150000:
             iters.append(di["its"])
             scores.append(di["metric_score"])
         else:
@@ -42,9 +43,19 @@ def get_comparison_plot(ckpt_dir, last_scores):
     model1_value = [1,2,4,6,8,16]
 
     # The values were updated from trained vanilla folder
-    model2_distang = [0.804, 0.823, 0.704, 0.786, 0.762]  #[0.7, 0.75,0.77,0.78,0.825]
-    model2_reconErr = [54.00, 34.18, 64.92, 40.40, 92.01]  # [37, 38,39,40,40]
-    model2_value = [10,20,30,40,50]  # [100,10,20,30,40]
+    # 300k [0.804, 0.823, 0.704, 0.786, 0.762]  # figure [0.7, 0.75,0.77,0.78,0.825]
+    model2_distang = [0.724, 0.826, 0.721, 0.778, 0.756] 
+    #300k [54.00, 34.18, 64.92, 40.40, 92.01]  #figure [37, 38,39,40,40]
+    model2_reconErr = [54.001, 34.181, 64.920, 40.402, 92.014] 
+    #figure [100,10,20,30,40]
+    model2_value = [10,20,30,40,50]
+
+    """
+    print("The vanilla results are")
+    print([x[0] for x in last_scores])
+    print([x[1] for x in last_scores])
+    print([x[2] for x in last_scores])
+    """
 
     model3_distang = [x[0] for x in last_scores] #[0.9,0.89,0.895, 0.91]
     model3_reconErr = [x[1] for x in last_scores] #[38, 39.5, 40,40]
@@ -84,7 +95,7 @@ def plot_disentanglemet_metric(ckpt_dir, seeds):
     ax1 = plt.subplot(1, 1, 1)
     last_scores = []
     for subdir in subdirs:
-        if "seed_1" in subdir:
+        if "seed_1" in subdir and ("ga_10" in subdir or "ga_20" in subdir or "ga_30" in subdir or "ga_40" in subdir  or "ga_50" in subdir):
             idx0 = subdir.index('seed')
             aver_disent, aver_recon, iters = [], [], []
             for seed in seeds: 
@@ -102,7 +113,12 @@ def plot_disentanglemet_metric(ckpt_dir, seeds):
             aver_disent = aver_disent / len(seeds)
             aver_recon = aver_recon / len(seeds)
             last_scores.append((aver_disent[-1], aver_recon, int(subdir[idx1+4:idx2])))
-            ax1.plot(iters, aver_disent, label=subdir[idx1+1:idx3])
+            p = ax1.plot(iters, aver_disent, label=subdir[idx1+1:idx3])
+            """
+            #Get index 150000
+            i = iters.index(150000)
+            ax1.axhline(aver_disent[i], color=p[-1].get_color())
+            """
         plt.ylim([0, 1.1])
         ax1.legend(loc='upper center', bbox_to_anchor=(0.5, 1.15), ncol=3)
         ax1.set_xlabel("iters")
@@ -143,7 +159,7 @@ def plot_training_loss(ckpt_dir, seeds):
 
     fig2, axs = plt.subplots(nrows=2, ncols=1, constrained_layout=True)
     for subdir in subdirs:
-        if "seed_1" in subdir:
+        if "seed_1" in subdir and ("ga_10" in subdir or "ga_20" in subdir or "ga_30" in subdir or "ga_40" in subdir  or "ga_50" in subdir):
             idx0 = subdir.index('seed')
             aver_recon, aver_tc, iters = [], [], []
             for seed in seeds:
@@ -153,16 +169,18 @@ def plot_training_loss(ckpt_dir, seeds):
                 if len(aver_recon) == 0:
                     aver_recon = np.zeros_like(recon_loss)
                     aver_tc = np.zeros_like(tc_loss)
-                    aver_recon += recon_loss
-                    aver_tc += tc_loss
-                aver_recon = aver_recon / len(seeds)
-                idx1 = subdir.index('_ga')
-                idx2 = subdir.index('_iters')
-                aver_tc = aver_tc / len(seeds)
+                aver_recon += recon_loss
+                aver_tc += tc_loss
+            aver_recon = aver_recon / len(seeds)
+            idx1 = subdir.index('_ga')
+            idx2 = subdir.index('_iters')
+            aver_tc = aver_tc / len(seeds)
             axs[0].plot(iters, aver_recon, label=subdir[idx1+1:idx2])
             axs[1].plot(iters, aver_tc, label=subdir[idx1+1:idx2])
     axs[0].legend(loc='upper center', bbox_to_anchor=(0.5, 1.15), ncol=3)
     axs[1].legend(loc='upper center', bbox_to_anchor=(0.5, 1.15), ncol=3)
+    #axs[0].set_ylim([0, 150])
+    #axs[1].set_ylim([-0.3, 0.7])
     axs[1].set_xlabel("iters")
     axs[0].set_ylabel("recon_loss")
     axs[1].set_ylabel("tc_loss")

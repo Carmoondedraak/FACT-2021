@@ -227,7 +227,7 @@ def experiment3(args, seed):
             hyperparameter on AD-FactorVAE performance
     """
     gammas = [10, 20, 30, 40, 50]
-    lambdas = [0.5, 1.5]
+    lambdas = [1.5]
     for la in lambdas:
         args.lambdaa = la
         for ga in gammas:
