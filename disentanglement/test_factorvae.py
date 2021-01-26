@@ -14,6 +14,70 @@ from utils import mkdirs
 import json
 
 
+### Define the FactorVAE disentanglement metric tester
+
+class Tester(BaseFactorVae):
+    def __init__(self, args):
+        # Misc
+        use_cuda = args.cuda and torch.cuda.is_available()
+        self.device = 'cuda' if use_cuda else 'cpu'
+        self.name = args.name
+        self.max_iter = int(args.max_iter)
+        self.print_iter = args.print_iter
+        self.global_iter = 0
+        self.pbar = tqdm(total=self.max_iter)
+        # Data
+        self.dset_dir = args.dset_dir
+        self.dataset = args.dataset
+        self.batch_size = args.batch_size
+        self.data_loader, self.data = return_data(args)
+        # Networks & Optimizers
+        self.z_dim = args.z_dim
+        self.gamma = args.gamma
+        self.lambdaa = args.lambdaa
+        self.lr_VAE = args.lr_VAE
+        self.beta1_VAE = args.beta1_VAE
+        self.beta2_VAE = args.beta2_VAE
+        self.lr_D = args.lr_D
+        self.beta1_D = args.beta1_D
+        self.beta2_D = args.beta2_D
+        if args.dataset == 'dsprites':
+            self.VAE = FactorVAE1(self.z_dim).to(self.device)
+            self.nc = 1
+        else:
+            self.VAE = FactorVAE2(self.z_dim).to(self.device)
+            self.nc = 3
+        self.optim_VAE = optim.Adam(self.VAE.parameters(), lr=self.lr_VAE,
+                                    betas=(self.beta1_VAE, self.beta2_VAE))
+        self.D = Discriminator(self.z_dim).to(self.device)
+        self.optim_D = optim.Adam(self.D.parameters(), lr=self.lr_D,
+                                  betas=(self.beta1_D, self.beta2_D))
+        self.nets = [self.VAE, self.D]
+        # Visdom
+        self.viz_on = args.viz_on
+        self.win_id = dict(D_z='win_D_z', recon='win_recon', kld='win_kld', acc='win_acc')
+        self.line_gather = DataGather('iter', 'soft_D_z', 'soft_D_z_pperm', 'recon', 'kld', 'acc')
+        self.image_gather = DataGather('true', 'recon')
+        if self.viz_on:
+            self.viz_port = args.viz_port
+            self.viz = visdom.Visdom(log_to_filename='./logging.log', offline=True)
+            self.viz_ll_iter = args.viz_ll_iter
+            self.viz_la_iter = args.viz_la_iter
+            self.viz_ra_iter = args.viz_ra_iter
+            self.viz_ta_iter = args.viz_ta_iter
+            if not self.viz.win_exists(env=self.name+'/lines', win=self.win_id['D_z']):
+                self.viz_init()
+
+        # Checkpoint
+        self.ckpt_dir = args.ckpt_dir
+        self.ckpt_save_iter = args.ckpt_save_iter
+        mkdirs(self.ckpt_dir)
+        # Output(latent traverse GIF)
+        self.output_dir = os.path.join(args.output_dir, args.name)
+        self.output_save = args.output_save
+        mkdirs(self.output_dir)
+
+
 def analyse_disentanglement_metric(json_path):
     """ It receives the path to the json file and plots the proposed metric results  """
     iters, scores = [], []
