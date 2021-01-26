@@ -13,8 +13,13 @@ import cv2
 from PIL import Image
 import torch.distributions as td
 
-
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 batch_size = 64
+lr = 1e-3
+train_digit = 1
+test_digit = 9
+layer_dimensions = [784, 484, 256, 64, 16]
+im_size = (1, 28, 28)
 
 # Combines input image and attention map into final colormap
 def get_cam(image, gcam):
@@ -30,22 +35,19 @@ def get_cam(image, gcam):
     return gcam
 
 # Define our one class MNIST loaders, one for training, another for testing
-train_dataset = OneClassMNIST(1, './Datasets/MNIST_dataset/', transforms.ToTensor(), download=False, train=True)
+train_dataset = OneClassMNIST(train_digit, './Datasets/MNIST_dataset/', transforms.ToTensor(), download=False, train=True)
 train_loader = torch.utils.data.DataLoader(
     train_dataset, batch_size=batch_size
 )
 
-test_dataset = OneClassMNIST(9, './Datasets/MNIST_dataset/', transforms.ToTensor(), download=False, train=True)
+test_dataset = OneClassMNIST(test_digit, './Datasets/MNIST_dataset/', transforms.ToTensor(), download=False, train=True)
 test_loader = torch.utils.data.DataLoader(
     test_dataset, batch_size=batch_size
 )
 
 # Single RBM layer
 class RBM(nn.Module):
-    def __init__(self,
-                 n_vis=784,
-                 n_hin=49,
-                 k=5):
+    def __init__(self, n_vis, n_hin, k=1):
         super(RBM, self).__init__()
         self.W = nn.Parameter(torch.randn(n_hin,n_vis)*1e-2)
         self.v_bias = nn.Parameter(torch.zeros(n_vis))
@@ -53,7 +55,7 @@ class RBM(nn.Module):
         self.k = k
     
     def sample_from_p(self,p):
-        return F.relu(torch.sign(p - Variable(torch.rand(p.size()))))
+        return F.relu(torch.sign(p - Variable(torch.rand(p.size())).to(device)))
     
     def v_to_h(self,v):
         v = torch.flatten(v, start_dim=1)
@@ -85,7 +87,7 @@ class RBM(nn.Module):
 
 # A class that stacks RBMs
 class StackRBMs(nn.Module):
-    def __init__(self, n_hs=[784, 400, 49], layer_idx=1):
+    def __init__(self, n_hs, layer_idx):
         super(StackRBMs, self).__init__()
         self.n_hs = n_hs
         self.layers = nn.Sequential()
@@ -100,7 +102,6 @@ class StackRBMs(nn.Module):
     
     def save_layer_grads(self, g_output):
         self.layer_grad_out = g_output
-        print(g_output.shape)
 
     def free_energy(self, v):
         for i, rbm in enumerate(self.layers.children()):
@@ -162,10 +163,10 @@ class StackRBMs(nn.Module):
 
         A, alpha = A.unsqueeze(0), alpha.unsqueeze(1)
         M = F.conv3d(A, (alpha), padding=0, groups=len(alpha)).squeeze(0).squeeze(1)
-        M = F.interpolate(M.unsqueeze(1), size=(28, 28), mode='bilinear', align_corners=False)
+        M = F.interpolate(M.unsqueeze(1), size=im_size[1:], mode='bilinear', align_corners=False)
         M = F.sigmoid(M)
         
-        v = v.reshape(v.shape[0], 1, 28, 28)
+        v = v.reshape(v.shape[0], *im_size)
         colormap = self.create_colormap(v, M)
 
         return M, colormap
@@ -212,13 +213,13 @@ class StackRBMs(nn.Module):
 
 # Creates a new Stacked RBM of 4 layers trained on OneClassMNIST
 def train_srbm():
-    srbm = StackRBMs(n_hs=[784, 484, 256, 64, 16])
-    train_op = optim.SGD(srbm.parameters(),0.1)
+    srbm = StackRBMs(n_hs=layer_dimensions, layer_idx=3).to(device)
+    train_op = optim.SGD(srbm.parameters(), lr)
     for epoch in range(80):
         loss_ = []
         for _, (data,target) in enumerate(train_loader):
             data = Variable(data.view(-1,784))
-            sample_data = data.bernoulli()
+            sample_data = data.bernoulli().to(device)
             
             v,v1 = srbm(sample_data)
             loss = srbm.free_energy(v) - srbm.free_energy(v1)
@@ -238,33 +239,35 @@ def train_srbm():
 
 # Loads and returns a stacked RBM model
 def load_srbm_model(name='srbm.ckpt'):
-    srbm = StackRBMs(n_hs=[784, 484, 256, 64, 16])
+    srbm = StackRBMs(n_hs=layer_dimensions, layer_idx=3).to(device)
     srbm.load_state_dict(torch.load(name))
     srbm.curr_layer = 3
-    srbm.layer_idx = 3
     return srbm
 
 # Evaluates a stacked RBM model
 def eval_srbm_model(srbm):
     v, _ = next(iter(train_loader))
+    v = v.to(device)
 
     v, p_v, sample_v = srbm.reconstruct(v)
 
-    save_image(make_grid(v.reshape(v.shape[0], 1, 28, 28)), f'input.png')
-    save_image(make_grid(sample_v.reshape(v.shape[0], 1, 28, 28)), f'reconstruct.png')
+    save_image(make_grid(v.reshape(v.shape[0], *im_size).cpu().detach()), f'input.png')
+    save_image(make_grid(sample_v.reshape(v.shape[0], *im_size).cpu().detach()), f'reconstruct.png')
 
     v_outlier, _ = next(iter(test_loader))
+    v_outlier = v_outlier.to(device)
 
     M, colormap = srbm.attmaps(v_outlier)
-    save_image(make_grid(M), f'outlier_input.png')
-    save_image(make_grid(colormap), f'outlier_attmaps.png')
+    save_image(make_grid(M.cpu().detach()), f'outlier_input.png')
+    save_image(make_grid(colormap.cpu().detach()), f'outlier_attmaps.png')
 
     for i in range(4):
         srbm.layer_idx = i
         srbm.curr_layer = i
-        M, colormap = srbm.attmaps(v_outlier)
-        save_image(make_grid(M), f'outlier_input_layerid{i}.png')
-        save_image(make_grid(colormap), f'outlier_attmaps_layerid{i}.png')
+        for temp in np.arange(start=0.1, stop=1.0, step=0.1):
+            M, colormap = srbm.attmaps(v_outlier, temp=temp)
+            save_image(make_grid(M.cpu().detach()), f"outlier_input_layerid{i}_temp{str(temp).replace('.', '_')}.png")
+            save_image(make_grid(colormap.cpu().detach()), f"outlier_attmaps_layerid{i}_temp{str(temp).replace('.', '_')}.png")
 
 
 # Run this line to train a new stacked RBM
