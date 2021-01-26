@@ -13,6 +13,16 @@ from utils import mkdirs
 
 import json
 
+from tqdm import tqdm
+import visdom
+
+import torch.optim as optim
+
+from utils import DataGather, BaseFactorVae
+from ops import recon_loss, kl_divergence, permute_dims, attention_disentanglement, GradCamDissen
+from model import FactorVAE1, FactorVAE2, Discriminator
+from dataset import return_data
+
 
 ### Define the FactorVAE disentanglement metric tester
 
