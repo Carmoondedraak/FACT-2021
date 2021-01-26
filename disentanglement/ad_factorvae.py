@@ -97,7 +97,8 @@ class Solver(BaseFactorVae):
         # Output(latent traverse GIF)
         self.output_dir = os.path.join(args.output_dir, args.name)
         self.output_save = args.output_save
-        mkdirs(self.output_dir)
+        if self.output_save:
+            mkdirs(self.output_dir)
 
     def select_attention_maps(self, maps):
         """
@@ -227,7 +228,7 @@ def experiment3(args, seed):
             hyperparameter on AD-FactorVAE performance
     """
     gammas = [10, 20, 30, 40, 50]
-    lambdas = [1.5]
+    lambdas = [0.5, 1.5]
     for la in lambdas:
         args.lambdaa = la
         for ga in gammas:
@@ -275,7 +276,7 @@ if __name__ == "__main__":
     parser.add_argument('--ckpt_save_iter', default=10000, type=int, help='checkpoint save iter')
 
     parser.add_argument('--output_dir', default='outputs', type=str, help='output directory')
-    parser.add_argument('--output_save', default=True, type=str2bool, help='whether to save traverse results')
+    parser.add_argument('--output_save', default=False, type=str2bool, help='whether to save traverse results')
 
     args = parser.parse_args()
 

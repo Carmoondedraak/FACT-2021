@@ -89,7 +89,8 @@ class Solver(BaseFactorVae):
         # Output(latent traverse GIF)
         self.output_dir = os.path.join(args.output_dir, args.name)
         self.output_save = args.output_save
-        mkdirs(self.output_dir)
+        if self.output_save:
+            mkdirs(self.output_dir)
 
     def train(self):
         self.net_mode(train=True)
