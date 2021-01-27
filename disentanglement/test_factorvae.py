@@ -88,6 +88,7 @@ class Tester(BaseFactorVae):
         self.ckpt_save_iter = args.ckpt_save_iter
         mkdirs(self.ckpt_dir)
         if args.ckpt_load:
+            #args.ckpt_load = '1000.pth'
             self.load_checkpoint(args.ckpt_load)
 
         # Output(latent traverse GIF)
@@ -96,7 +97,7 @@ class Tester(BaseFactorVae):
         if self.output_save:
             mkdirs(self.output_dir)
 
-    def test(self, batch_size=5, shape='square'):
+    def test(self, batch_size, shape):
         fixed_idx = {'square': (87040, 332800),
                     'ellipse': (332800, 578560),
                     'heart': (578560, 737280)}[shape]
@@ -109,7 +110,11 @@ class Tester(BaseFactorVae):
         x_rec, M, colormaps = self.generate_attention_maps(batch)
         x_rec, M, colormaps = x_rec.detach().cpu(), M.detach().cpu(), colormaps.detach().cpu()
 
-        colormaps = make_grid(colormaps)
+        batch = make_grid(batch[0], nrow=batch_size)
+        save_image(batch.float(), '{}/batch_{}_ori.png'.format(self.output_dir, batch_size))
+        bnmaps = make_grid(M, nrow=batch_size)
+        save_image(bnmaps.float(), '{}/batch_{}_bnmaps.png'.format(self.output_dir, batch_size))
+        colormaps = make_grid(colormaps, nrow=batch_size)
         save_image(colormaps.float(), '{}/batch_{}_attmaps.png'.format(self.output_dir, batch_size))
 
     def generate_attention_maps(self, batch, limit=3, inter=2/3, loc=-1):
@@ -117,29 +122,40 @@ class Tester(BaseFactorVae):
         self.VAE.zero_grad()
         self.D.zero_grad()
 
-        x, _ = batch
-        img_shape = x.shape[2:]
-        x = x.to(self.device) 
-        x_rec, mu, logvar, z = self.VAE(x)
-        #n_channels = x.shape[1]
+        with torch.set_grad_enabled(True):
+            x, _ = batch
+            #x = x.unsqueeze(0)
+            img_shape = x.shape[2:]
+            x = x.to(self.device) 
+            x_rec, mu, logvar, z = self.VAE(x)
+            #n_channels = x.shape[1]
 
-        score = torch.sum(mu)
-        score.backward(retain_graph=True)
+            score = torch.sum(mu)
+            score.backward(retain_graph=True)
 
-        #Retrieve the activations and gradients
-        dz_da, A = self.VAE.get_conv_output()
+            #Retrieve the activations and gradients
+            dz_da, A = self.VAE.get_conv_output()
 
         # Compute attention map M and color maps
         dz_da = dz_da / (torch.sqrt(torch.mean(torch.square(dz_da))) + 1e-5)
         alpha = F.avg_pool2d(dz_da, kernel_size=dz_da.shape[2:])
-        #A, alpha = A, alpha
+        A, alpha = A, alpha
 
         A, alpha = A.unsqueeze(0), alpha.unsqueeze(1)
         M = F.conv3d(A, (alpha), padding=0, groups=len(alpha)).squeeze(0).squeeze(1)
         M = F.interpolate(M.unsqueeze(1), size=img_shape, mode='bilinear', align_corners=False)
         M = torch.abs(M)
 
-        colormaps = self.create_colormap(x, M)
+        highest_M, maxi = None, torch.zeros(1).to(self.device)
+        for m in M:
+            mapp = m.squeeze(0)
+            tmp = mapp.mean()
+            if tmp > maxi:
+                print(tmp, maxi)
+                highest_M = mapp
+                maxi = tmp
+
+        colormaps = self.create_colormap(x, M) #highest_M)
 
         # Zero out the gradient again
         self.VAE.zero_grad()
@@ -147,13 +163,14 @@ class Tester(BaseFactorVae):
 
         return x_rec, M, colormaps
 
+    """
     def unnormalize_batch(self, imgs, mean, std, n_channels):
-        """ Unnormalizes a batch of images given mu and std per channel """
         mean = torch.tensor(mean).view(n_channels, 1, 1)
         std = torch.tensor(std).view(n_channels, 1, 1)
         un_tensor = imgs * std.to(self.device)
         un_tensor = un_tensor + mean.to(self.device)
         return un_tensor
+    """
 
     def create_colormap(self, x, attmaps, unnormalize=False):
         """
@@ -415,7 +432,7 @@ def main():
     #plot_disentanglemet_metric(args.ckpt_dir, seeds)
     t = Tester(args)
     #t.generate_figure_rows('heart', n_samples=10, limit=3, inter=2/3)
-    t.test(10, 'square')
+    t.test(1, 'heart')
     #t.generate_attention_maps()
 
     print("Finished after {} seconds.".format(str(time.time() - start)))
