@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import numpy as np
-from pl_bolts.models.autoencoders.components import (resnet18_encoder, resnet18_decoder)
+from pl_bolts.models.autoencoders.components import (resnet18_encoder, resnet18_decoder, EncoderBlock)
 
 # Reshape layer, used for going from flat layer to 2D shape in decoder
 class Reshape(nn.Module):
@@ -166,14 +166,14 @@ class VAE(nn.Module):
             x = self.dec_vae(z)
         return x
 
-    # TODO: Issues on backprop with norm difference reparametriziation
     def norm_diff_reparametrize(self, mu, log_var):
         """
         Alternative reparametrization used only for inferencing attention maps, not used for training
-        
+        See equation 4 of paper
         """
-        zx = self.sample_reparameterize(self.norm_mu, self.norm_log_var).to(mu.device)
-        zy = self.sample_reparameterize(mu, log_var)
+        zx, px, qx = self.sample_reparameterize(self.norm_mu, self.norm_log_var)
+        zx = zx.to(mu.device)
+        zy, py, qy = self.sample_reparameterize(mu, log_var)
         zu = zx + zy
 
         y_var = torch.exp(log_var)
