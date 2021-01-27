@@ -97,14 +97,13 @@ class Tester(BaseFactorVae):
             mkdirs(self.output_dir)
 
     def test(self, batch_size=5, shape='square'):
-        fixed_idx = {'square': (87040,332800),
-            'ellipse': (332800,578560),
-            'heart': (578560,737280)}[shape]
+        fixed_idx = {'square': (87040, 332800),
+                    'ellipse': (332800, 578560),
+                    'heart': (578560, 737280)}[shape]
 
         s, e  = fixed_idx
-        useful_samples_idx = torch.tensor([i for i in range(s,e,1)], dtype=torch.float) #np.where(factors[:, fixed_k] == fixed_value)[0]
-        #print("The number of useful samples are", len(useful_samples_idx))
-        random_idx = torch.multinomial(useful_samples_idx, batch_size) #np.random.choice(useful_samples_idx, num_examples_per_vote)
+        useful_samples_idx = torch.tensor([i for i in range(s, e, 1)], dtype=torch.float)
+        random_idx = torch.multinomial(useful_samples_idx, batch_size)
         batch = self.data[random_idx]
 
         x_rec, M, colormaps = self.generate_attention_maps(batch)
@@ -117,7 +116,7 @@ class Tester(BaseFactorVae):
         self.net_mode(train=False)
         self.VAE.zero_grad()
         self.D.zero_grad()
-        
+
         x, _ = batch
         img_shape = x.shape[2:]
         x = x.to(self.device) 
@@ -134,7 +133,7 @@ class Tester(BaseFactorVae):
         dz_da = dz_da / (torch.sqrt(torch.mean(torch.square(dz_da))) + 1e-5)
         alpha = F.avg_pool2d(dz_da, kernel_size=dz_da.shape[2:])
         #A, alpha = A, alpha
-        
+
         A, alpha = A.unsqueeze(0), alpha.unsqueeze(1)
         M = F.conv3d(A, (alpha), padding=0, groups=len(alpha)).squeeze(0).squeeze(1)
         M = F.interpolate(M.unsqueeze(1), size=img_shape, mode='bilinear', align_corners=False)
@@ -148,72 +147,6 @@ class Tester(BaseFactorVae):
 
         return x_rec, M, colormaps
 
-        """
-        decoder = self.VAE.decode
-        encoder = self.VAE.encode
-        interpolation = torch.arange(-limit, limit+0.1, inter)
-        """
-
-        """
-        fixed_img = self.data_loader.dataset.__getitem__(fixed_idx[0])[0]
-        fixed_img = fixed_img.to(self.device).unsqueeze(0)
-        fixed_img_z = encoder(fixed_img)[:, :self.z_dim]
-        Z = {shape: fixed_img_z}
-        """        
-
-        #Z = {shape: mus}
-        
-        """
-        gifs, samples = [], []
-        for key in Z:
-            z_ori = Z[key]
-            c = z_ori.clone()
-            sample = F.sigmoid(decoder(c)).data
-            samples.append(sample)
-            gifs.append(sample)
-
-            samples = torch.cat(samples, dim=0).cpu()
-            title = '{}_latent_traversal(iter:{})'.format(key, self.global_iter)
-            self.viz.images(samples, env=self.name+'/traverse',
-                            opts=dict(title=title), nrow=1)#len(interpolation))
-        """
-
-        """
-        gifs = []
-        for key in Z:
-            z_ori = Z[key]
-            samples = []
-            for row in range(self.z_dim):
-                if loc != -1 and row != loc:
-                    continue
-                z = z_ori.clone()
-                #for val in interpolation:
-                #z[:, row] = val
-                sample = F.sigmoid(decoder(z)).data
-                samples.append(sample)
-                gifs.append(sample)
-            samples = torch.cat(samples, dim=0).cpu()
-            title = '{}_latent_traversal(iter:{})'.format(key, self.global_iter)
-            self.viz.images(samples, env=self.name+'/traverse',
-                            opts=dict(title=title), nrow=1)#len(interpolation))
-        """
-
-        """
-        if self.output_save:
-            output_dir = os.path.join(self.output_dir, str(self.global_iter))
-            mkdirs(output_dir)
-            gifs = torch.cat(gifs)
-            gifs = gifs.view(len(Z), n_samples, 1, self.nc, 64, 64).transpose(1, 2) #len(interpolation), self.nc, 64, 64).transpose(1, 2)
-            for i, key in enumerate(Z.keys()):
-                for j in [0]: #j, val in enumerate(interpolation):
-                    save_image(tensor=gifs[i][j].cpu(),
-                               filename=os.path.join(output_dir, '{}_{}.jpg'.format(key, j)),
-                               nrow=self.z_dim, pad_value=1)
-
-                #grid2gif(str(os.path.join(output_dir, key+'*.jpg')),
-                #         str(os.path.join(output_dir, key+'.gif')), delay=10)
-        """
-    
     def unnormalize_batch(self, imgs, mean, std, n_channels):
         """ Unnormalizes a batch of images given mu and std per channel """
         mean = torch.tensor(mean).view(n_channels, 1, 1)
@@ -482,7 +415,7 @@ def main():
     #plot_disentanglemet_metric(args.ckpt_dir, seeds)
     t = Tester(args)
     #t.generate_figure_rows('heart', n_samples=10, limit=3, inter=2/3)
-    t.test(5, 'square')
+    t.test(10, 'square')
     #t.generate_attention_maps()
 
     print("Finished after {} seconds.".format(str(time.time() - start)))
