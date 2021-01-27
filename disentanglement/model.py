@@ -101,7 +101,7 @@ class FactorVAE1(nn.Module):
 class FactorVAE_Dsprites(nn.Module):
     """Encoder and Decoder architecture for 2D Shapes data."""
     def __init__(self, layer_idx, z_dim=10):
-        super(FactorVAE1, self).__init__()
+        super(FactorVAE_Dsprites, self).__init__()
         self.z_dim = z_dim
         self.layer_idx = layer_idx
 
@@ -131,6 +131,21 @@ class FactorVAE_Dsprites(nn.Module):
             nn.ReLU(True),
             nn.ConvTranspose2d(32, 1, 4, 2, 1),
         )
+        
+        def set_hook_func(self, inp, out):
+            inp[0].requires_grad_()
+            
+            self.layer_activ_out = out
+
+            def save_layer_grads(grad_out):
+                self.layer_grad_out = grad_out
+
+            self.layer_activ_out.requires_grad_(True)
+            self.layer_activ_out.register_hook(save_layer_grads)
+
+        # Registering the hooks
+        self.encode[layer_idx].register_forward_hook(set_hook_func)
+
         self.weight_init()
 
     def weight_init(self, mode='normal'):
@@ -160,7 +175,7 @@ class FactorVAE_Dsprites(nn.Module):
             x_recon = self.decode(z).view(x.size())
             return x_recon, mu, logvar, z.squeeze()
 
-    def get_conv_outputs(self):
+    def get_conv_output(self):
         # Since it is nn.Sequential, we can use the layer_idx directly
         activ = self.encode[self.layer_idx].layer_activ_out
         grad = self.encode[self.layer_idx].layer_grad_out

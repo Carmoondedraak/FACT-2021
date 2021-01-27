@@ -56,7 +56,7 @@ class Tester(BaseFactorVae):
         self.beta1_D = args.beta1_D
         self.beta2_D = args.beta2_D
         if args.dataset == 'dsprites':
-            self.VAE = FactorVAE_Dsprites(self.z_dim, 'encode.10').to(self.device)
+            self.VAE = FactorVAE_Dsprites(10, self.z_dim).to(self.device)
             self.nc = 1
         else:
             self.VAE = FactorVAE2(self.z_dim).to(self.device)
@@ -113,12 +113,14 @@ class Tester(BaseFactorVae):
         colormaps = make_grid(colormaps)
         save_image(colormaps.float(), '{}/batch_{}_attmaps.png'.format(self.output_dir, batch_size))
 
-    def generate_figure_rows(self, batch, limit=3, inter=2/3, loc=-1):
+    def generate_attention_maps(self, batch, limit=3, inter=2/3, loc=-1):
         self.net_mode(train=False)
         self.VAE.zero_grad()
         self.D.zero_grad()
         
         x, _ = batch
+        img_shape = x.shape[2:]
+        x = x.to(self.device) 
         x_rec, mu, logvar, z = self.VAE(x)
         #n_channels = x.shape[1]
 
@@ -126,16 +128,16 @@ class Tester(BaseFactorVae):
         score.backward(retain_graph=True)
 
         #Retrieve the activations and gradients
-        dz_da, A = self.VAE.get_layer_data()
+        dz_da, A = self.VAE.get_conv_output()
 
         # Compute attention map M and color maps
         dz_da = dz_da / (torch.sqrt(torch.mean(torch.square(dz_da))) + 1e-5)
         alpha = F.avg_pool2d(dz_da, kernel_size=dz_da.shape[2:])
         #A, alpha = A, alpha
         
-        A, alpha = A.unsqueeze(), alpha.unsqueeze(1)
+        A, alpha = A.unsqueeze(0), alpha.unsqueeze(1)
         M = F.conv3d(A, (alpha), padding=0, groups=len(alpha)).squeeze(0).squeeze(1)
-        M = F.interpolate(M.unsqueeze(1), size=self.hparams.im_shape[1:], mode='bilinear', align_corners=False)
+        M = F.interpolate(M.unsqueeze(1), size=img_shape, mode='bilinear', align_corners=False)
         M = torch.abs(M)
 
         colormaps = self.create_colormap(x, M)
@@ -212,14 +214,22 @@ class Tester(BaseFactorVae):
                 #         str(os.path.join(output_dir, key+'.gif')), delay=10)
         """
     
-    def create_colormap(self, x, attmaps, unnormalize=True):
+    def unnormalize_batch(self, imgs, mean, std, n_channels):
+        """ Unnormalizes a batch of images given mu and std per channel """
+        mean = torch.tensor(mean).view(n_channels, 1, 1)
+        std = torch.tensor(std).view(n_channels, 1, 1)
+        un_tensor = imgs * std.to(self.device)
+        un_tensor = un_tensor + mean.to(self.device)
+        return un_tensor
+
+    def create_colormap(self, x, attmaps, unnormalize=False):
         """
         Creates and returns a colormap from the attention map and original input image
             x - original input images
             attmaps - attention maps from the model inferred from the input images
         """
         if unnormalize:
-            x = self.trainer.datamodule.unnormalize_batch(x)
+            x = self.unnormalize_batch(x)
         attmaps = attmaps.detach()
         n_channels = x.shape[1]
         if n_channels == 1:
