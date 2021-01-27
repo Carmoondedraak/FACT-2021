@@ -21,9 +21,11 @@ import torch.nn.functional as F
 from torchvision.utils import make_grid, save_image
 
 from utils import DataGather, BaseFactorVae
-from ops import recon_loss, kl_divergence, permute_dims, attention_disentanglement, GradCamDissen
-from model import FactorVAE1, FactorVAE2, Discriminator
+from ops import recon_loss, kl_divergence, permute_dims, attention_disentanglement, get_cam, GradCamDissen
+from model import FactorVAE1, FactorVAE_Dsprites, FactorVAE2, Discriminator
 from dataset import return_data
+
+from PIL import Image
 
 
 ### Define the FactorVAE disentanglement metric tester
@@ -54,7 +56,7 @@ class Tester(BaseFactorVae):
         self.beta1_D = args.beta1_D
         self.beta2_D = args.beta2_D
         if args.dataset == 'dsprites':
-            self.VAE = FactorVAE1(self.z_dim).to(self.device)
+            self.VAE = FactorVAE_Dsprites(self.z_dim, 'encode.10').to(self.device)
             self.nc = 1
         else:
             self.VAE = FactorVAE2(self.z_dim).to(self.device)
@@ -94,37 +96,72 @@ class Tester(BaseFactorVae):
         if self.output_save:
             mkdirs(self.output_dir)
 
-    def generate_figure_rows(self, shape='square', n_samples=5, limit=3, inter=2/3, loc=-1):
-        self.net_mode(train=False)
-
-        decoder = self.VAE.decode
-        encoder = self.VAE.encode
-        #interpolation = torch.arange(-limit, limit+0.1, inter)
-
+    def test(self, batch_size=5, shape='square'):
         fixed_idx = {'square': (87040,332800),
-                    'ellipse': (332800,578560),
-                    'heart': (578560,737280)}[shape]
-        """
-        fixed_idx1 = 87040 # square
-        fixed_idx2 = 332800 # ellipse
-        fixed_idx3 = 578560 # heart
-        """
-        
+            'ellipse': (332800,578560),
+            'heart': (578560,737280)}[shape]
+
         s, e  = fixed_idx
         useful_samples_idx = torch.tensor([i for i in range(s,e,1)], dtype=torch.float) #np.where(factors[:, fixed_k] == fixed_value)[0]
         #print("The number of useful samples are", len(useful_samples_idx))
-        random_idx = torch.multinomial(useful_samples_idx, n_samples) #np.random.choice(useful_samples_idx, num_examples_per_vote)
-        sampled_imgs = self.data[random_idx][0]
-        #sampled_imgs = sampled_imgs.to(self.device)#.unsqueeze(0)
-        #mus = encoder(sampled_imgs)[:, :self.z_dim]
+        random_idx = torch.multinomial(useful_samples_idx, batch_size) #np.random.choice(useful_samples_idx, num_examples_per_vote)
+        batch = self.data[random_idx]
 
+        x_rec, M, colormaps = self.generate_attention_maps(batch)
+        x_rec, M, colormaps = x_rec.detach().cpu(), M.detach().cpu(), colormaps.detach().cpu()
+
+        colormaps = make_grid(colormaps)
+        save_image(colormaps.float(), '{}/batch_{}_attmaps.png'.format(self.output_dir, batch_size))
+
+    def generate_figure_rows(self, batch, limit=3, inter=2/3, loc=-1):
+        self.net_mode(train=False)
+        self.VAE.zero_grad()
+        self.D.zero_grad()
+        
+        x, _ = batch
+        x_rec, mu, logvar, z = self.VAE(x)
+        #n_channels = x.shape[1]
+
+        score = torch.sum(mu)
+        score.backward(retain_graph=True)
+
+        #Retrieve the activations and gradients
+        dz_da, A = self.VAE.get_layer_data()
+
+        # Compute attention map M and color maps
+        dz_da = dz_da / (torch.sqrt(torch.mean(torch.square(dz_da))) + 1e-5)
+        alpha = F.avg_pool2d(dz_da, kernel_size=dz_da.shape[2:])
+        #A, alpha = A, alpha
+        
+        A, alpha = A.unsqueeze(), alpha.unsqueeze(1)
+        M = F.conv3d(A, (alpha), padding=0, groups=len(alpha)).squeeze(0).squeeze(1)
+        M = F.interpolate(M.unsqueeze(1), size=self.hparams.im_shape[1:], mode='bilinear', align_corners=False)
+        M = torch.abs(M)
+
+        colormaps = self.create_colormap(x, M)
+
+        # Zero out the gradient again
+        self.VAE.zero_grad()
+        self.D.zero_grad()
+
+        return x_rec, M, colormaps
+
+        """
+        decoder = self.VAE.decode
+        encoder = self.VAE.encode
+        interpolation = torch.arange(-limit, limit+0.1, inter)
+        """
+
+        """
         fixed_img = self.data_loader.dataset.__getitem__(fixed_idx[0])[0]
         fixed_img = fixed_img.to(self.device).unsqueeze(0)
         fixed_img_z = encoder(fixed_img)[:, :self.z_dim]
         Z = {shape: fixed_img_z}
-        """
-        Z = {shape: mus}
+        """        
 
+        #Z = {shape: mus}
+        
+        """
         gifs, samples = [], []
         for key in Z:
             z_ori = Z[key]
@@ -137,6 +174,7 @@ class Tester(BaseFactorVae):
             title = '{}_latent_traversal(iter:{})'.format(key, self.global_iter)
             self.viz.images(samples, env=self.name+'/traverse',
                             opts=dict(title=title), nrow=1)#len(interpolation))
+        """
 
         """
         gifs = []
@@ -156,7 +194,9 @@ class Tester(BaseFactorVae):
             title = '{}_latent_traversal(iter:{})'.format(key, self.global_iter)
             self.viz.images(samples, env=self.name+'/traverse',
                             opts=dict(title=title), nrow=1)#len(interpolation))
+        """
 
+        """
         if self.output_save:
             output_dir = os.path.join(self.output_dir, str(self.global_iter))
             mkdirs(output_dir)
@@ -170,36 +210,33 @@ class Tester(BaseFactorVae):
 
                 #grid2gif(str(os.path.join(output_dir, key+'*.jpg')),
                 #         str(os.path.join(output_dir, key+'.gif')), delay=10)
-
-    def generate_attention_maps(self, shape='squares'):
         """
-        if self.viz_on and (self.global_iter%self.viz_ll_iter == 0):
-            soft_D_z = F.softmax(D_z, 1)[:, :1].detach()
-            soft_D_z_pperm = F.softmax(D_z_pperm, 1)[:, :1].detach()
-            D_acc = ((soft_D_z >= 0.5).sum() + (soft_D_z_pperm < 0.5).sum()).float()
-            D_acc /= 2*self.batch_size
-            self.line_gather.insert(iter=self.global_iter,
-                                    soft_D_z=soft_D_z.mean().item(),
-                                    soft_D_z_pperm=soft_D_z_pperm.mean().item(),
-                                    recon=vae_recon_loss.item(),
-                                    kld=vae_kld.item(),
-                                    acc=D_acc.item())
-
-        if self.viz_on and (self.global_iter%self.viz_la_iter == 0):
-            self.visualize_line()
-            self.line_gather.flush()
-
-        if self.viz_on and (self.global_iter%self.viz_ra_iter == 0):
-            self.image_gather.insert(true=x_true1.data.cpu(),
-                                        recon=F.sigmoid(x_recon).data.cpu())
-            self.visualize_recon()
-            self.image_gather.flush()
+    
+    def create_colormap(self, x, attmaps, unnormalize=True):
         """
-        # if self.viz_on and (self.global_iter%self.viz_ta_iter == 0):
-        if self.dataset.lower() == '3dchairs':
-            self.visualize_traverse(limit=2, inter=0.5)
-        else:
-            self.visualize_traverse(limit=3, inter=2/3)
+        Creates and returns a colormap from the attention map and original input image
+            x - original input images
+            attmaps - attention maps from the model inferred from the input images
+        """
+        if unnormalize:
+            x = self.trainer.datamodule.unnormalize_batch(x)
+        attmaps = attmaps.detach()
+        n_channels = x.shape[1]
+        if n_channels == 1:
+            x = x.repeat(1, 3, 1, 1)
+        colormaps = torch.zeros(x.shape)
+        for i in range(x.size(0)):
+            raw_image = x[i] * 255.0
+            ndarr = raw_image.permute(1, 2, 0).cpu().byte().numpy()
+            im = Image.fromarray(ndarr.astype(np.uint8))
+
+            r_im = np.asarray(im)
+            gcam = get_cam(r_im, attmaps[i].squeeze().cpu().data.numpy())
+            colormaps[i] = torch.from_numpy(gcam).permute(2, 0, 1)/255
+
+        permute = [2, 1, 0]
+        colormaps = colormaps[:, permute]
+        return colormaps
 
 
 def analyse_disentanglement_metric(json_path):
@@ -434,7 +471,8 @@ def main():
     #plot_training_loss(args.ckpt_dir, seeds)
     #plot_disentanglemet_metric(args.ckpt_dir, seeds)
     t = Tester(args)
-    t.generate_figure_rows('heart', n_samples=10, limit=3, inter=2/3)
+    #t.generate_figure_rows('heart', n_samples=10, limit=3, inter=2/3)
+    t.test(5, 'square')
     #t.generate_attention_maps()
 
     print("Finished after {} seconds.".format(str(time.time() - start)))
