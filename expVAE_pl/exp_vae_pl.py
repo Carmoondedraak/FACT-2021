@@ -14,12 +14,17 @@ from vae_model import VAE
 from torchvision.utils import make_grid, save_image
 from pytorch_lightning.metrics.functional.classification import roc, auc, iou
 from pytorch_lightning import metrics
-
+from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 
 
 class ExpVAE(pl.LightningModule):
     
-    def __init__(self, im_shape, lr=1e-3, inference_mode='mean_sum', layer_idx=2, z_dim=32, auroc=False):
+    # def __init__(self, im_shape, lr=1e-3, inference_mode='mean_sum', layer_idx=2, z_dim=32, auroc=False):
+    def __init__(self, im_shape, auroc=None, lr=None, batch_size=None, epochs=None, progress_bar=None,
+                early_stopping=None, layer_idx=None, z_dim=None, dataset=None, num_workers=None,
+                train_digit=None, test_digit=None, mvtec_object=None, inference_mode=None,
+                sample_during_training=None, sample_every_n_epoch=None, eval=None, model_version=None,
+                init_seed=None):
         """
         args:
             lr - Learning rate used for training
@@ -30,8 +35,16 @@ class ExpVAE(pl.LightningModule):
             z_dim - The latent dimension size to use for encoding/decoding
             auroc - Boolean switch, indicating whether we have access to target masks and if we want to compute
                     the AUROC scores for them. MNIST doesn't have target masks, UCSD and MVTEC do
+            Other arguments are listed are not functional, but for logging, as save_hyperparameters() allows 
+            us to track all arguments with tensorboard
         """
         super().__init__()
+
+        # Set defaults to None when arguments are irrelevant
+        if 'mvtec' not in dataset:
+            mvtec_object = None
+        elif 'mnist' not in dataset:
+            train_digit, test_digit = None, None
 
         self.save_hyperparameters()
         
@@ -51,15 +64,14 @@ class ExpVAE(pl.LightningModule):
 
         # Unpack and define some variables for calculating the loss
         p, q, z, mu, log_var = stats
-        n_channels = x.shape[1]
+        im_shape = x.shape[2:]
         
-        # For grayscale, we use summed BCE for reconstruction loss
-        if n_channels == 1:
-            # L_rec = F.binary_cross_entropy_with_logits(recon_x, x, reduction='sum')
-            L_rec = F.binary_cross_entropy(x_rec, x, reduction='sum')
-        # For color, we use mean MSE for reconstruction loss)
-        elif n_channels == 3:
+        # For MVTEC images, we use mean MSE for reconstruction loss
+        if im_shape == (256, 256):
             L_rec = F.mse_loss(x_rec, x, reduction='mean')
+        # For others, we use summed BCE for reconstruction loss)
+        else:
+            L_rec = F.binary_cross_entropy(x_rec, x, reduction='sum')
 
         # Compute KL divergence between encoder and unit Gaussian
         log_qz = q.log_prob(z)
@@ -445,13 +457,25 @@ def exp_vae(args):
         log_dir = 'dsprites_logs'
         raise NotImplementedError
 
-    # Create PyTorch Lightning callback for sampling, if enabled
     callbacks = []
+
+    # Create PyTorch Lightning callback for sampling, if enabled
     if args.sample_during_training:
         att_map_cb = SampleAttentionCallback(batch_size=args.batch_size, every_n_epoch=args.sample_every_n_epoch)
         callbacks.append(att_map_cb)
 
-    # Create checkpoint for saving the model, based on the validation loss
+    # Create PyTorch Lightning callback for early stopping, in enabled
+    if args.early_stopping:
+        early_stop_monitor = 'val_loss'
+        early_stop_mode = 'min'
+        early_stop_cb = EarlyStopping(
+            monitor=early_stop_monitor,
+            patience=50,
+            mode=early_stop_mode
+        )
+        callbacks.append(early_stop_cb)
+
+    # Create checkpoint callback for saving the model, based on the validation loss or AUROC based on dataset
     monitor = 'val_loss' if args.dataset.lower() == 'mnist'else 'auroc'
     mode = 'min' if args.dataset.lower() == 'mnist' else 'max'
     # monitor = 'val_loss'
@@ -504,7 +528,8 @@ def exp_vae(args):
         # Otherwise, we initialize a new model
         else:
             im_size = dm.dims
-            model = ExpVAE(im_size, lr=args.lr, z_dim=args.z_dim, layer_idx=args.layer_idx, auroc=quantitative_eval)
+            d = vars(args)
+            model = ExpVAE(im_size, quantitative_eval, **d)
 
         # Choosing which inferencing method to use
         if args.inference_mode == 'normal_diff':
@@ -514,7 +539,7 @@ def exp_vae(args):
         # Train model
         trainer.fit(model, dm)
 
-torch.autograd.set_detect_anomaly(True)
+
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -524,6 +549,8 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', default=128, type=int, help='Batch size for training')
     parser.add_argument('--epochs', default=100, type=int, help='Number of epochs to use for training')
     parser.add_argument('--progress_bar', default=True, type=bool, help='Show or hide progress bar during training')
+    parser.add_argument('--early_stopping', default=True, type=bool, help='Enable early stopping of training models. \
+                            This is based off of minimum validation loss for MNIST, and maximum AUROC for UCSD and MVTec-AD, with patience 10')
 
     # Model Hyperparameters
     parser.add_argument('--layer_idx', default=2, type=int, help='Layer number to use for attention map generation')
@@ -532,6 +559,7 @@ if __name__ == '__main__':
     # Dataset options
     parser.add_argument('--dataset', default='mnist', type=str, help='Dataset used for training and visualization')
     parser.add_argument('--num_workers', default=4, type=int, help='Number of workers to use for dataloader')
+
     # Dataset specific options
     parser.add_argument('--train_digit', default='1', type=int, help='Digit to be trained on (only for MNIST)')
     parser.add_argument('--test_digit', default='7', type=int, help='Digit to be evaluated on (only for MNIST)')
