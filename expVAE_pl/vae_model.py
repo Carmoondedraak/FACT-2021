@@ -66,25 +66,21 @@ class VAE(nn.Module):
                 nn.ReLU(),
                 nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1), # (50 * 50) - (25 * 25)
                 nn.ReLU(),
-                nn.Conv2d(128, 128, kernel_size=5, stride=2, padding=1), # (25 * 25) - (12 * 12)
+                nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1), # (25 * 25) - (12 * 12)
                 nn.ReLU(),
-                nn.Conv2d(128, 128, kernel_size=4, stride=2, padding=1), # (12 * 12) - (6 * 6)
-                nn.ReLU(),
-                nn.Flatten(), # 6*6*128 = 4,608
-                nn.Linear(4608, 1024),
+                nn.Flatten(), # 12*12*256 = 36864
+                nn.Linear(36864, 1024),
                 nn.ReLU(),
             )
             # This part defines the decoder part of the VAE on images of (1*100*100)
             self.dec_vae = nn.Sequential(
                 nn.Linear(self.z_dim, 1024),
                 nn.ReLU(),
-                nn.Linear(1024, 4608),
+                nn.Linear(1024, 36864),
                 nn.ReLU(),
-                Reshape((128, 6, 6)),
+                Reshape((256, 12, 12)),
                 nn.ReLU(),
-                nn.ConvTranspose2d(128, 128, kernel_size=4, stride=2, padding=1),
-                nn.ReLU(),
-                nn.ConvTranspose2d(128, 128, kernel_size=5, stride=2, padding=1),
+                nn.ConvTranspose2d(256, 128, kernel_size=5, stride=2, padding=1),
                 nn.ReLU(),
                 nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1),
                 nn.ReLU(),
