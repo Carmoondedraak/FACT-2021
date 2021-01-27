@@ -29,7 +29,8 @@ def download_and_extract(url, path):
     print('Extracting datasets...')
     thetarfile.extractall(path)
 
-# TODO: Second inference method
+# Calculates the mu and log_var for a given model on the entire
+# dataset. Used for the second inference method (eq 4) in the paper
 def calc_latent_mu_var(model, dm, batch_size):
     stats = torch.zeros((dm.train_set.__len__(), 2))
     norm_mu, norm_var = [], []
@@ -41,7 +42,7 @@ def calc_latent_mu_var(model, dm, batch_size):
     norm_mu = torch.cat(norm_mu, dim=0).mean(0)
     norm_var = torch.cat(norm_var, dim=0).mean(0)
 
-    return norm_mu, norm_var
+    return norm_mu.detach(), norm_var.detach()
 
 # Sets working directory to project directory, so that all dataset paths
 # will be relative to the project directory
