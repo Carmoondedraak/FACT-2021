@@ -36,8 +36,8 @@ def calc_latent_mu_var(model, dm, batch_size):
     norm_mu, norm_var = [], []
     for i, (x, _) in enumerate(dm.train_dataloader()):
         mu, log_var = model.encode(x)
-        norm_mu.append(mu)
-        norm_var.append(log_var)
+        norm_mu.append(mu.detach().cpu())
+        norm_var.append(log_var.detach().cpu())
 
     norm_mu = torch.cat(norm_mu, dim=0).mean(0)
     norm_var = torch.cat(norm_var, dim=0).mean(0)
