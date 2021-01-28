@@ -88,7 +88,6 @@ class Tester(BaseFactorVae):
         self.ckpt_save_iter = args.ckpt_save_iter
         mkdirs(self.ckpt_dir)
         if args.ckpt_load:
-            args.ckpt_load = '1000.pth'
             self.load_checkpoint(args.ckpt_load)
 
         # Output(latent traverse GIF)
@@ -102,10 +101,15 @@ class Tester(BaseFactorVae):
                     'ellipse': (332800, 578560),
                     'heart': (578560, 737280)}[shape]
 
-        s, e  = fixed_idx
-        useful_samples_idx = torch.tensor([i for i in range(s, e, 1)], dtype=torch.float)
-        random_idx = torch.multinomial(useful_samples_idx, batch_size)
-        batch = self.data[random_idx]
+        fixed_idxs = [87040, 332800, 578560]
+
+        #s, e  = fixed_idx
+        #e = s + batch_size
+        #useful_samples_idx = torch.tensor([i for i in range(s, e, 1)], dtype=torch.float)
+        #random_idx = torch.multinomial(useful_samples_idx, batch_size)
+        #batch = self.data[random_idx]
+        idxs = [ fixed_idxs[i%len(fixed_idxs)] for i in range(batch_size)]
+        batch = self.data[idxs]
 
         x_rec, (f_M,s_M), (f_c,s_c) = self.generate_attention_maps(batch)
         x_rec = x_rec.detach().cpu()
@@ -124,12 +128,33 @@ class Tester(BaseFactorVae):
         self.VAE.zero_grad()
         self.D.zero_grad()
 
+        num_classes = [6,40,32,32] # freq. of latent value factors (excluding color and shape)
+
         with torch.set_grad_enabled(True):
             x, _ = batch
             #x = x.unsqueeze(0)
             img_shape = x.shape[2:]
             x = x.to(self.device) 
-            x_rec, mu, logvar, z = self.VAE(x)
+            
+            stats  = self.VAE.encode(x)
+            mu = stats[:, :self.VAE.z_dim]
+            logvar = stats[:, self.VAE.z_dim:]
+            z = self.VAE.reparametrize(mu, logvar)
+
+            
+            # Swaping a latent channel per sample
+            """
+            for i in range(x.size(0)):
+                #lat = i % len(num_classes)
+                rand = torch.rand(1).item()
+                interpolation = torch.arange(-limit*rand, rand*limit+0.1, inter)
+                #z[i, lat] = torch.rand(1).item()#torch.randint(0, num_classes[lat],(1,)).item()
+                for val in interpolation:
+                    z[i,:] = val
+            """
+            x_rec = F.sigmoid(self.VAE.decode(z).view(x.size())).data
+
+            
             #n_channels = x.shape[1]
 
             score = torch.sum(mu)
@@ -435,7 +460,7 @@ def main():
     #plot_disentanglemet_metric(args.ckpt_dir, seeds)
     t = Tester(args)
     #t.generate_figure_rows('heart', n_samples=10, limit=3, inter=2/3)
-    t.test(2, 'heart')
+    t.test(5, 'ellipse')
     #t.generate_attention_maps()
 
     print("Finished after {} seconds.".format(str(time.time() - start)))
