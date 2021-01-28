@@ -6,3 +6,7 @@
 disentanglement/data/*
 disentanglement/outputs/*
 disentanglement/logging.log
+expVAE_pl/mnist_logs/*
+expVAE_pl/ucsd_logs/*
+expVAE_pl/mvtec_logs/*
+expVAE_pl/Datasets/*
