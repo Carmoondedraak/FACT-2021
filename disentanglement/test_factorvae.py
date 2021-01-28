@@ -139,29 +139,37 @@ class Tester(BaseFactorVae):
         # Compute attention map M and color maps
         dz_da = dz_da / (torch.sqrt(torch.mean(torch.square(dz_da))) + 1e-5)
         alpha = F.avg_pool2d(dz_da, kernel_size=dz_da.shape[2:])
-        A, alpha = A, alpha
-
-        A, alpha = A.unsqueeze(0), alpha.unsqueeze(1)
-        M = F.conv3d(A, (alpha), padding=0, groups=len(alpha)).squeeze(0).squeeze(1)
-        M = F.interpolate(M.unsqueeze(1), size=img_shape, mode='bilinear', align_corners=False)
+        M = alpha*A
+        M = F.interpolate(M, size=img_shape, mode='bilinear', align_corners=False)
         M = torch.abs(M)
 
-        highest_M, maxi = None, torch.zeros(1).to(self.device)
-        for m in M:
-            mapp = m.squeeze(0)
-            tmp = mapp.mean()
-            if tmp > maxi:
-                print(tmp, maxi)
-                highest_M = mapp
-                maxi = tmp
+        highest_Ms = []
+        # For each example in the batch
+        for i in range(M.shape[0]):
+            m = M[i,:,:,:]
+            highest_M = None
+            maxi = torch.zeros(1).to(self.device)
+            # Pick highest response map
+            for j in range(M.shape[1]):
+                mk = m[j]
+                tmp = mk.mean()
+                if tmp > maxi:
+                    print(tmp, maxi)
+                    highest_M = mk
+                    maxi = tmp
 
-        colormaps = self.create_colormap(x, M) #highest_M)
+            # Add it to a list
+            highest_Ms.append(highest_M)
+
+        # Convert list to tensor and generate color maps
+        highest_Ms = torch.stack(highest_Ms).unsqueeze(1).to(self.device)
+        colormaps = self.create_colormap(x, highest_Ms) #highest_M)
 
         # Zero out the gradient again
         self.VAE.zero_grad()
         self.D.zero_grad()
 
-        return x_rec, M, colormaps
+        return x_rec, highest_Ms, colormaps
 
     """
     def unnormalize_batch(self, imgs, mean, std, n_channels):
