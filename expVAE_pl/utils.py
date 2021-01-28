@@ -23,10 +23,15 @@ def get_cam(image, gcam):
 # Helper function to download and extract files given a url to a specified path
 # Used by UCSD_Dataset.py to download and extract the dataset
 def download_and_extract(url, path):
-    print('Downloading datasets...')
     ftpstream = request.urlopen(url)
-    thetarfile = tarfile.open(fileobj=ftpstream, mode="r|gz")
-    print('Extracting datasets...')
+    if 'gz' in url:
+        thetarfile = tarfile.open(fileobj=ftpstream, mode="r|gz")
+    elif 'xz' in url:
+        thetarfile = tarfile.open(fileobj=ftpstream, mode="r|xz")
+    else:
+        unrecognized_file_ext = url.rsplit('.')[0]
+        raise ValueError(f'Expected a url with .tar.gz or .tar.xz, but found {unrecognized_file_ext}')
+    print('Downloading dataset, this may take a while...')
     thetarfile.extractall(path)
 
 # Calculates the mu and log_var for a given model on the entire
