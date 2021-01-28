@@ -19,7 +19,6 @@ from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 
 class ExpVAE(pl.LightningModule):
     
-    # def __init__(self, im_shape, lr=1e-3, inference_mode='mean_sum', layer_idx=2, z_dim=32, auroc=False):
     def __init__(self, im_shape, auroc=None, lr=None, batch_size=None, epochs=None, progress_bar=None,
                 early_stopping=None, layer_idx=None, z_dim=None, dataset=None, num_workers=None,
                 train_digit=None, test_digit=None, mvtec_object=None, inference_mode=None,
