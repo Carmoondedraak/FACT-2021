@@ -56,7 +56,7 @@ class Tester(BaseFactorVae):
         self.beta1_D = args.beta1_D
         self.beta2_D = args.beta2_D
         if args.dataset == 'dsprites':
-            self.VAE = FactorVAE_Dsprites(10, self.z_dim).to(self.device)
+            self.VAE = FactorVAE_Dsprites(0, self.z_dim).to(self.device)
             self.nc = 1
         else:
             self.VAE = FactorVAE2(self.z_dim).to(self.device)
@@ -88,7 +88,7 @@ class Tester(BaseFactorVae):
         self.ckpt_save_iter = args.ckpt_save_iter
         mkdirs(self.ckpt_dir)
         if args.ckpt_load:
-            #args.ckpt_load = '1000.pth'
+            args.ckpt_load = '1000.pth'
             self.load_checkpoint(args.ckpt_load)
 
         # Output(latent traverse GIF)
@@ -107,14 +107,16 @@ class Tester(BaseFactorVae):
         random_idx = torch.multinomial(useful_samples_idx, batch_size)
         batch = self.data[random_idx]
 
-        x_rec, M, colormaps = self.generate_attention_maps(batch)
-        x_rec, M, colormaps = x_rec.detach().cpu(), M.detach().cpu(), colormaps.detach().cpu()
+        x_rec, (f_M,s_M), (f_c,s_c) = self.generate_attention_maps(batch)
+        x_rec = x_rec.detach().cpu()
+        f_M, colormaps_f = f_M.detach().cpu(), f_c.detach().cpu()
+        s_M, colormaps_s = s_M.detach().cpu(), s_c.detach().cpu()
 
         batch = make_grid(batch[0], nrow=batch_size)
         save_image(batch.float(), '{}/batch_{}_ori.png'.format(self.output_dir, batch_size))
-        bnmaps = make_grid(M, nrow=batch_size)
+        bnmaps = make_grid(torch.cat((f_M,s_M), 0), nrow=batch_size)
         save_image(bnmaps.float(), '{}/batch_{}_bnmaps.png'.format(self.output_dir, batch_size))
-        colormaps = make_grid(colormaps, nrow=batch_size)
+        colormaps = make_grid(torch.cat((colormaps_f,colormaps_s), 0), nrow=batch_size)
         save_image(colormaps.float(), '{}/batch_{}_attmaps.png'.format(self.output_dir, batch_size))
 
     def generate_attention_maps(self, batch, limit=3, inter=2/3, loc=-1):
@@ -143,11 +145,11 @@ class Tester(BaseFactorVae):
         M = F.interpolate(M, size=img_shape, mode='bilinear', align_corners=False)
         M = torch.abs(M)
 
-        highest_Ms = []
+        highest_Ms, sec_highest_Ms = [], []
         # For each example in the batch
         for i in range(M.shape[0]):
             m = M[i,:,:,:]
-            highest_M = None
+            highest_M, second_M = None, None
             maxi = torch.zeros(1).to(self.device)
             # Pick highest response map
             for j in range(M.shape[1]):
@@ -155,39 +157,32 @@ class Tester(BaseFactorVae):
                 tmp = mk.mean()
                 if tmp > maxi:
                     print(tmp, maxi)
+                    second_M = highest_M
                     highest_M = mk
                     maxi = tmp
 
             # Add it to a list
             highest_Ms.append(highest_M)
+            sec_highest_Ms.append(second_M)
 
         # Convert list to tensor and generate color maps
         highest_Ms = torch.stack(highest_Ms).unsqueeze(1).to(self.device)
-        colormaps = self.create_colormap(x, highest_Ms) #highest_M)
+        colormaps1 = self.create_colormap(x, highest_Ms)
+        sec_highest_Ms = torch.stack(sec_highest_Ms).unsqueeze(1).to(self.device)
+        colormaps2 = self.create_colormap(x, sec_highest_Ms)
 
         # Zero out the gradient again
         self.VAE.zero_grad()
         self.D.zero_grad()
 
-        return x_rec, highest_Ms, colormaps
+        return x_rec, (highest_Ms, sec_highest_Ms), (colormaps1, colormaps2)
 
-    """
-    def unnormalize_batch(self, imgs, mean, std, n_channels):
-        mean = torch.tensor(mean).view(n_channels, 1, 1)
-        std = torch.tensor(std).view(n_channels, 1, 1)
-        un_tensor = imgs * std.to(self.device)
-        un_tensor = un_tensor + mean.to(self.device)
-        return un_tensor
-    """
-
-    def create_colormap(self, x, attmaps, unnormalize=False):
+    def create_colormap(self, x, attmaps):
         """
         Creates and returns a colormap from the attention map and original input image
             x - original input images
             attmaps - attention maps from the model inferred from the input images
         """
-        if unnormalize:
-            x = self.unnormalize_batch(x)
         attmaps = attmaps.detach()
         n_channels = x.shape[1]
         if n_channels == 1:
@@ -440,7 +435,7 @@ def main():
     #plot_disentanglemet_metric(args.ckpt_dir, seeds)
     t = Tester(args)
     #t.generate_figure_rows('heart', n_samples=10, limit=3, inter=2/3)
-    t.test(1, 'heart')
+    t.test(2, 'heart')
     #t.generate_attention_maps()
 
     print("Finished after {} seconds.".format(str(time.time() - start)))
