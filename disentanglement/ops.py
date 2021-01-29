@@ -38,7 +38,6 @@ def attention_disentanglement(att1, att2):
         Returns:
             Float value representing the loss
     """
-    # TODO assert expected shapes and types
     numer = torch.min(att1,att2).sum()
     denomi = torch.add(att1,att2).sum()
 
