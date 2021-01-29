@@ -42,7 +42,7 @@ For more detailed comparison between model performance and metrics, as well as t
 ```tensorboard --logdir ./{dataset}_logs/lightning_logs```
 
 #### Reproducing results from the paper
-To reproduce the results in the paper, run the script tests.py. It will run and evaluate models on the dataset MNIST, UCSD Pedestrians and MVTec-AD, and save samples during training in the corresponding lightning_logs/ folders.
+Since the models are too large to upload to the repo, to reproduce the results in the paper, run the script tests.py. It will run and evaluate models on the dataset MNIST, UCSD Pedestrians and MVTec-AD, and save samples during training in the corresponding lightning_logs/ folders.
 
 ## Attention Disentanglement Instructions
 ### Data 
