@@ -77,9 +77,9 @@ def plot_train_loss(ckpt_dir, seeds, gammas, lambdas, max_iters, detail):
         axs[1].set_ylim([-0.3, 0.85])
         fig2.set_figheight(6)
         fig2.set_figwidth(8)
-    axs[1].set_xlabel("iters")
-    axs[0].set_ylabel("recon_loss")
-    axs[1].set_ylabel("tc_loss")
+    axs[1].set_xlabel("iterations")
+    axs[0].set_ylabel("reconstruction loss")
+    axs[1].set_ylabel("true total correlation (VAE)")
     mkdirs(os.path.join(ckpt_dir, 'output/'))
     fig2.savefig(ckpt_dir+'/output'+'/disent_train_metrics_abl.png')
 
@@ -106,7 +106,7 @@ def extract_disentanglement_metric(json_path, max_iters):
     return iters, scores, final_recon_loss
 
 
-def plot_disentanglemet(ckpt_dir, seeds, gammas, lambdas, max_iters, comp_plot):
+def plot_disentanglemet(ckpt_dir, seeds, gammas, lambdas, max_iters, detail):
     """ Given the root folder it extracts and plots the disentanglement metric """
     subdirs = [x[1] for x in os.walk(ckpt_dir)]
     subdirs = subdirs[0]
@@ -143,44 +143,44 @@ def plot_disentanglemet(ckpt_dir, seeds, gammas, lambdas, max_iters, comp_plot):
                 aver_recon = aver_recon / len(seeds)
                 last_scores.append((aver_disent[-1], aver_recon, int(subdir[idx1+4:idx2])))
                 ax1.plot(iters, aver_disent, label=subdir[idx1+1:idx3])
-        plt.ylim([0, 1.1])
+        if detail:
+            plt.ylim([0.4, 1.0])
+        else:
+            plt.ylim([0, 1.0])
         ax1.legend(loc='upper center', bbox_to_anchor=(0.5, 1.15), ncol=5)
-        ax1.set_xlabel("iters")
+        ax1.set_xlabel("iterations")
         ax1.set_ylabel("disentanglement metric")
         mkdirs(os.path.join(ckpt_dir, 'output/'))
         fig1.savefig(ckpt_dir+'/output'+'/disent_res_abl.png')
 
-    if not vanilla and comp_plot:
-        # To plot the trade-off between disentanglement metric and reconstruction loss
-        get_comparison_plot(ckpt_dir, last_scores)
 
-
-def get_comparison_plot(ckpt_dir, last_scores):
-    """ It aims to reproduce the results observed in Figure 8 (Just the AD-FactorVAE) """
-    model1_distang = [0.69, 0.685, 0.73,0.70,0.625, 0.68]
-    model1_reconErr = [20, 30,42, 58, 60, 111]
+def get_comparison_plot(scores_van, scores_ad):
+    """ It aims to reproduce the results observed in Figure 8 (For FactorVAE and AD-FactorVAE) """
+    model1_distang = [0.69, 0.685, 0.73, 0.700, 0.625, 0.68]
+    model1_reconErr = [20, 30, 42, 58, 60, 111]
     model1_value = [1,2,4,6,8,16]
 
     # The values were updated from trained vanilla folder
-    model2_distang = [0.804, 0.823, 0.704, 0.786, 0.762]  #[0.7, 0.75,0.77,0.78,0.825]
-    model2_reconErr = [54.00, 34.18, 64.92, 40.40, 92.01]  # [37, 38,39,40,40]
-    model2_value = [10,20,30,40,50]  # [100,10,20,30,40]
+    model2_distang = [x[0] for x in scores_van]
+    model2_reconErr = [x[1] for x in scores_van]
+    model2_value = [x[2] for x in scores_van]
 
-    model3_distang = [x[0] for x in last_scores] #[0.9,0.89,0.895, 0.91]
-    model3_reconErr = [x[1] for x in last_scores] #[38, 39.5, 40,40]
-    model3_value = [x[2] for x in last_scores] #[10,20,30,40]
+    # The values were updated from trained AD folder
+    model3_distang = [x[0] for x in scores_ad]
+    model3_reconErr = [x[1] for x in scores_ad]
+    model3_value = [x[2] for x in scores_ad]
 
     fig, ax = plt.subplots()
 
-    scatter = ax.scatter(model1_reconErr, model1_distang, marker="o", c='b', label='beta VAE')
+    ax.scatter(model1_reconErr, model1_distang, marker="o", c='b', label='beta VAE')
     for i, txt in enumerate(model1_value):
         ax.annotate(txt, (model1_reconErr[i], model1_distang[i]), size=12)
 
-    scatter = ax.scatter(model2_reconErr, model2_distang, marker="o", c='g', label='factor VAE')
+    ax.scatter(model2_reconErr, model2_distang, marker="o", c='g', label='Factor VAE')
     for i, txt in enumerate(model2_value):
         ax.annotate(txt, (model2_reconErr[i], model2_distang[i]), size=12)
 
-    scatter = ax.scatter(model3_reconErr, model3_distang, marker="o", c='r', label='AD factor VAE')
+    ax.scatter(model3_reconErr, model3_distang, marker="o", c='r', label='AD Factor VAE')
     for i, txt in enumerate(model3_value):
         ax.annotate(txt, (model3_reconErr[i], model3_distang[i]), size=12)
 
@@ -192,7 +192,55 @@ def get_comparison_plot(ckpt_dir, last_scores):
     plt.xlim([0, 150])
     plt.ylim([0.3, 1])
     plt.grid(color='r', linestyle=':', linewidth=0.5)
-    fig.savefig(ckpt_dir+'/output'+'/figure8.png')
+
+
+def plot_comparison_methods(ckpt_dirs, seeds, gammass, lambdass, max_iters):
+
+    scores_per_ckpt = []
+    for i in range(len(ckpt_dirs)):
+        ckpt_dir = ckpt_dirs[i]
+        #print("Current {}".format(ckpt_dir))
+        subdirs = [x[1] for x in os.walk(ckpt_dir)]
+        subdirs = subdirs[0]
+
+        vanilla = 'vanilla' in ckpt_dir
+        gammas = gammass[i]
+        gammas = ['ga_'+str(i) for i in gammas]
+        #print("Current {}".format(gammas))
+        lambdas = lambdass[i]
+        lambdas = ['la_'+str(i) for i in lambdas]
+        #print("Current {}".format(lambdas))
+
+        last_scores = []
+        for subdir in subdirs:
+            if seeds[0] in subdir:
+                idx0 = subdir.index('seed')
+                aver_disent, aver_recon = [], []
+                for seed in seeds:
+                    if any(ga in subdir for ga in gammas):
+                        if vanilla or any(lam in subdir for lam in lambdas):
+                            path = os.path.join(ckpt_dir, subdir[:idx0]+seed, "metrics.json")
+                            #print("Current {}".format(path))
+                            _, disent_vals, recon_loss = extract_disentanglement_metric(path, max_iters)
+                            if len(aver_disent) == 0:
+                                aver_disent = np.zeros_like(disent_vals)
+                                aver_recon = np.zeros_like(recon_loss)
+                            aver_disent += disent_vals
+                            aver_recon += recon_loss
+                if len(aver_disent) != 0:
+                    idx1 = subdir.index('_ga')
+                    idx3 = subdir.index('_iters')
+                    if not vanilla:
+                        idx2 = subdir.index('_la')
+                    else:
+                        idx2 = idx3
+                    aver_disent = aver_disent / len(seeds)
+                    aver_recon = aver_recon / len(seeds)
+                    last_scores.append((aver_disent[-1], aver_recon, int(subdir[idx1+4:idx2])))
+        scores_per_ckpt.append(last_scores)
+
+    # Get plot
+    get_comparison_plot(scores_per_ckpt[0], scores_per_ckpt[1])
 
 
 def main():
