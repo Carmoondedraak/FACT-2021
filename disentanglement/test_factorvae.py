@@ -3,7 +3,7 @@ import torch
 import os
 import numpy as np
 from matplotlib import pyplot as plt
-from .utils import str2bool, mkdirs
+from utils import str2bool, mkdirs
 import time
 import json
 
@@ -153,6 +153,46 @@ def plot_disentanglemet(ckpt_dir, seeds, gammas, lambdas, max_iters, comp_plot):
     if not vanilla and comp_plot:
         # To plot the trade-off between disentanglement metric and reconstruction loss
         get_comparison_plot(ckpt_dir, last_scores)
+
+
+def get_comparison_plot(ckpt_dir, last_scores):
+    """ It aims to reproduce the results observed in Figure 8 (Just the AD-FactorVAE) """
+    model1_distang = [0.69, 0.685, 0.73,0.70,0.625, 0.68]
+    model1_reconErr = [20, 30,42, 58, 60, 111]
+    model1_value = [1,2,4,6,8,16]
+
+    # The values were updated from trained vanilla folder
+    model2_distang = [0.804, 0.823, 0.704, 0.786, 0.762]  #[0.7, 0.75,0.77,0.78,0.825]
+    model2_reconErr = [54.00, 34.18, 64.92, 40.40, 92.01]  # [37, 38,39,40,40]
+    model2_value = [10,20,30,40,50]  # [100,10,20,30,40]
+
+    model3_distang = [x[0] for x in last_scores] #[0.9,0.89,0.895, 0.91]
+    model3_reconErr = [x[1] for x in last_scores] #[38, 39.5, 40,40]
+    model3_value = [x[2] for x in last_scores] #[10,20,30,40]
+
+    fig, ax = plt.subplots()
+
+    scatter = ax.scatter(model1_reconErr, model1_distang, marker="o", c='b', label='beta VAE')
+    for i, txt in enumerate(model1_value):
+        ax.annotate(txt, (model1_reconErr[i], model1_distang[i]), size=12)
+
+    scatter = ax.scatter(model2_reconErr, model2_distang, marker="o", c='g', label='factor VAE')
+    for i, txt in enumerate(model2_value):
+        ax.annotate(txt, (model2_reconErr[i], model2_distang[i]), size=12)
+
+    scatter = ax.scatter(model3_reconErr, model3_distang, marker="o", c='r', label='AD factor VAE')
+    for i, txt in enumerate(model3_value):
+        ax.annotate(txt, (model3_reconErr[i], model3_distang[i]), size=12)
+
+    plt.rc('axes', labelsize=8)
+    ax.legend(loc="upper right" )
+    ax.set_title('Reconstruction error against disentanglement metric ', size = 13)
+    ax.set_xlabel('reconstruction error', size = 15)
+    ax.set_ylabel('disentanglement metric', size = 15)
+    plt.xlim([0, 150])
+    plt.ylim([0.3, 1])
+    plt.grid(color='r', linestyle=':', linewidth=0.5)
+    fig.savefig(ckpt_dir+'/output'+'/figure8.png')
 
 
 def main():
