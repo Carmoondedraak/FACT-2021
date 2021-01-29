@@ -10,12 +10,9 @@ TA: Christos Athanasiadis
 | Kevin Waller   | kevin.waller@student.uva.nl      |
 | Qiao Ren       | qiao.ren@student.uva.nl          |
 
-## Summary
-TODO
 
 ### Installation and Setup
-The dependencies to run this projects are described in ```experiments.txt```;
-TODO create and define the procedure for a conda environment in ubuntu/mac;
+
 ```
 git clone https://github.com/Carmoondedraak/FACT-2021.git
 cd FACT-2021/expVAE_pl
@@ -47,14 +44,23 @@ For more detailed comparison between model performance and metrics, as well as t
 ## Attention Disentanglement Instructions
 ### Data 
 Download the 2D Shapes(dsprites) Dataset for the correct folder with ``` sh scripts/prepare_data.sh dsprites ```
-### TODO
+### Training
+To training FactorVAE use ``` sh scripts/dsprites.sh ```
+To train the AD-FactorVAE use ``` sh scripts/dsprites_vanilla.sh ```
+
+### To Obtain the Attention Maps
+For FactorVAE ``` sh scripts/test_dsprites_vanilla.sh ```
+For AD-FactorVAE ``` sh scripts/test_dsprites.sh ```
+
+### To Generate the plots
+Refer to the functions in disentanglement/test_factorvae.py
 
 ## References
-### Reference
+
 1. Disentangling by Factorising, Kim et al.([http://arxiv.org/abs/1802.05983])
 [http://arxiv.org/abs/1802.05983]: http://arxiv.org/abs/1802.05983
 
-### References for Attention Disentanglement Replication
+### Code References
 * The baseline codebase for this project is provided by the authors at [1] (https://github.com/liuem607/expVAE)
 * The FactorVAE implementation used in the Attention Disentanglement section is copied from [2] (https://github.com/1Konny/FactorVAE)
 * To implement the proposed disentanglement metric by the FactorVAE authors, the code from the following repository was adapted [3] (https://github.com/nicolasigor/FactorVAE/blob/f27136ef944b5fded7cc49ecaeb398f6909cc312/vae_dsprites_v2.py#L377)
