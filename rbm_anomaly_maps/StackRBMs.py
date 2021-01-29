@@ -272,7 +272,7 @@ def eval_srbm_model(srbm):
 
 
 # Run this line to train a new stacked RBM
-# srbm = train_srbm()
+srbm = train_srbm()
 # Run this line to load a stacked RBM
-srbm = load_srbm_model()
+# srbm = load_srbm_model()
 eval_srbm_model(srbm)
