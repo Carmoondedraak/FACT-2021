@@ -17,7 +17,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 batch_size = 64
 lr = 0.1
 train_digit = 1
-test_digit = 0
+test_digit = 9
 layer_dimensions = [784, 784, 625, 484, 324, 256, 169, 64, 36]
 epochs_per_layer = 40
 im_size = (1, 28, 28)
@@ -272,7 +272,7 @@ def eval_srbm_model(srbm):
 
 
 # Run this line to train a new stacked RBM
-srbm = train_srbm()
+# srbm = train_srbm()
 # Run this line to load a stacked RBM
-# srbm = load_srbm_model()
+srbm = load_srbm_model()
 eval_srbm_model(srbm)
