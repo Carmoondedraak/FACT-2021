@@ -154,7 +154,7 @@ class GradCamDissen(PropBase):
         else:
             self.score_fc = torch.sum(one_hot.cuda())
 
-        self.score_fc.backward(gradient=one_hot, retain_graph=True)
+        self.score_fc.backward(retain_graph=True)
 
     def normalize(self, grads):
         l2_norm = torch.sqrt(torch.mean(torch.pow(grads, 2))) + 1e-5
