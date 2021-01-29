@@ -98,6 +98,90 @@ class FactorVAE1(nn.Module):
             return x_recon, mu, logvar, z.squeeze()
 
 
+class FactorVAE_Dsprites(nn.Module):
+    """Encoder and Decoder architecture for 2D Shapes data."""
+    def __init__(self, layer_idx, z_dim=10):
+        super(FactorVAE_Dsprites, self).__init__()
+        self.z_dim = z_dim
+        self.layer_idx = layer_idx
+
+        self.encode = nn.Sequential(
+            nn.Conv2d(1, 32, 4, 2, 1),
+            nn.ReLU(True),
+            nn.Conv2d(32, 32, 4, 2, 1),
+            nn.ReLU(True),
+            nn.Conv2d(32, 64, 4, 2, 1),
+            nn.ReLU(True),
+            nn.Conv2d(64, 64, 4, 2, 1),
+            nn.ReLU(True),
+            nn.Conv2d(64, 128, 4, 1),
+            nn.ReLU(True),
+            nn.Conv2d(128, 2*z_dim, 1)
+        )
+        self.decode = nn.Sequential(
+            nn.Conv2d(z_dim, 128, 1),
+            nn.ReLU(True),
+            nn.ConvTranspose2d(128, 64, 4),
+            nn.ReLU(True),
+            nn.ConvTranspose2d(64, 64, 4, 2, 1),
+            nn.ReLU(True),
+            nn.ConvTranspose2d(64, 32, 4, 2, 1),
+            nn.ReLU(True),
+            nn.ConvTranspose2d(32, 32, 4, 2, 1),
+            nn.ReLU(True),
+            nn.ConvTranspose2d(32, 1, 4, 2, 1),
+        )
+
+        def set_hook_func(self, inp, out):
+            inp[0].requires_grad_()
+
+            self.layer_activ_out = out
+
+            def save_layer_grads(grad_out):
+                self.layer_grad_out = grad_out
+
+            self.layer_activ_out.requires_grad_(True)
+            self.layer_activ_out.register_hook(save_layer_grads)
+
+        # Registering the hooks
+        self.encode[layer_idx].register_forward_hook(set_hook_func)
+
+        self.weight_init()
+
+    def weight_init(self, mode='normal'):
+        if mode == 'kaiming':
+            initializer = kaiming_init
+        elif mode == 'normal':
+            initializer = normal_init
+
+        for block in self._modules:
+            for m in self._modules[block]:
+                initializer(m)
+
+    def reparametrize(self, mu, logvar):
+        std = logvar.mul(0.5).exp_()
+        eps = std.data.new(std.size()).normal_()
+        return eps.mul(std).add_(mu)
+
+    def forward(self, x, no_dec=False):
+        stats = self.encode(x)
+        mu = stats[:, :self.z_dim]
+        logvar = stats[:, self.z_dim:]
+        z = self.reparametrize(mu, logvar)
+
+        if no_dec:
+            return z.squeeze()
+        else:
+            x_recon = self.decode(z).view(x.size())
+            return x_recon, mu, logvar, z.squeeze()
+
+    def get_conv_output(self):
+        # Since it is nn.Sequential, we can use the layer_idx directly
+        activ = self.encode[self.layer_idx].layer_activ_out
+        grad = self.encode[self.layer_idx].layer_grad_out
+        return activ, grad
+
+
 class FactorVAE2(nn.Module):
     """Encoder and Decoder architecture for 3D Shapes, Celeba, Chairs data."""
     def __init__(self, z_dim=10):
