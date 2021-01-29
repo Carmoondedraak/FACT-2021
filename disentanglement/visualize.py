@@ -2,14 +2,13 @@ import argparse
 import torch
 import os
 import numpy as np
-from .utils import str2bool, mkdirs
 import time
 
 from tqdm import tqdm
 import visdom
 from PIL import Image
 
-from utils import DataGather, BaseFactorVae
+from utils import str2bool, mkdirs, DataGather, BaseFactorVae
 import torch.optim as optim
 import torch.nn.functional as F
 from torchvision.utils import make_grid, save_image
