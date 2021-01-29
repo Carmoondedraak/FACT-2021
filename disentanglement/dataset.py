@@ -9,10 +9,6 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision.datasets import ImageFolder
 from torchvision import transforms
 
-"""
-def is_power_of_2(num):
-    return ((num & (num - 1)) == 0) and num != 0
-"""
 
 class CustomImageFolder(ImageFolder):
     def __init__(self, root, transform=None):
@@ -84,7 +80,6 @@ def return_data(args):
         dset = CustomTensorDataset
     else:
         raise NotImplementedError
-
 
     train_data = dset(**train_kwargs)
     train_loader = DataLoader(train_data,

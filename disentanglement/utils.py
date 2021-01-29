@@ -390,7 +390,6 @@ class BaseFactorVae(ABC):
         factors = torch.from_numpy(data['latents_classes'])
         factors = factors[:, 1:] # Removing the color since its always white
         num_classes = [3,6,40,32,32] # the number of latent value factors
-        #print("The factors are ", type(factors), factors.shape, "with classes", len(num_classes))
         num_factors = len(num_classes)
 
         num_examples_per_vote = 100
@@ -405,15 +404,13 @@ class BaseFactorVae(ABC):
             for _ in range(num_votes_per_factor): # Generate training examples per factor
                 fixed_value = np.random.choice(num_classes[fixed_k]) 
                 useful_samples_idx = np.where(factors[:, fixed_k] == fixed_value)[0]
-                #print("The number of useful samples are", len(useful_samples_idx))
                 random_idx = np.random.choice(useful_samples_idx, num_examples_per_vote)
                 sample_imgs = self.data[random_idx]
-                #print("The num of sampled images is with shape", sample_imgs[0].shape)
                 # Get the models's predicitions/representations
                 _, mus, logvars, _ = self.VAE(sample_imgs[0].to(self.device))
                 mus = mus.detach().to(torch.device("cpu")).numpy()
                 logvars = logvars.detach().to(torch.device("cpu")).numpy()
-                #print(type(mus), type(logvars))
+
                 all_mus.append(mus)
                 all_logvars.append(logvars)
                 code_list_per_factor.append((mus, logvars))
