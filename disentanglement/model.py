@@ -98,10 +98,10 @@ class FactorVAE1(nn.Module):
             return x_recon, mu, logvar, z.squeeze()
 
 
-class FactorVAE_Dsprites(nn.Module):
+class FactorVAE1_Visual(nn.Module):
     """Encoder and Decoder architecture for 2D Shapes data."""
     def __init__(self, layer_idx, z_dim=10):
-        super(FactorVAE_Dsprites, self).__init__()
+        super(FactorVAE1_Visual, self).__init__()
         self.z_dim = z_dim
         self.layer_idx = layer_idx
 

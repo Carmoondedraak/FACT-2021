@@ -13,7 +13,7 @@ import torch.optim as optim
 import torch.nn.functional as F
 from torchvision.utils import make_grid, save_image
 
-from model import FactorVAE_Dsprites, FactorVAE2, Discriminator
+from model import FactorVAE1_Visual, FactorVAE2, Discriminator
 from dataset import return_data
 from ops import get_cam
 
@@ -46,7 +46,7 @@ class Tester(BaseFactorVae):
         self.beta1_D = args.beta1_D
         self.beta2_D = args.beta2_D
         if args.dataset == 'dsprites':
-            self.VAE = FactorVAE_Dsprites(0, self.z_dim).to(self.device)
+            self.VAE = FactorVAE1_Visual(0, self.z_dim).to(self.device)
             self.nc = 1
         else:
             self.VAE = FactorVAE2(self.z_dim).to(self.device)
@@ -86,18 +86,10 @@ class Tester(BaseFactorVae):
         if self.output_save:
             mkdirs(self.output_dir)
 
-    def test(self, batch_size, shape):
-        fixed_idx = {'square': (87040, 332800),
-                    'ellipse': (332800, 578560),
-                    'heart': (578560, 737280)}[shape]
-
+    def test(self, batch_size):
+        """ Generates and saves the attention maps with batch_size samples """
         fixed_idxs = [87040, 332800, 578560]
 
-        #s, e  = fixed_idx
-        #e = s + batch_size
-        #useful_samples_idx = torch.tensor([i for i in range(s, e, 1)], dtype=torch.float)
-        #random_idx = torch.multinomial(useful_samples_idx, batch_size)
-        #batch = self.data[random_idx]
         idxs = [ fixed_idxs[i%len(fixed_idxs)] for i in range(batch_size)]
         batch = self.data[idxs]
 
@@ -113,7 +105,7 @@ class Tester(BaseFactorVae):
         colormaps = make_grid(torch.cat((colormaps_f,colormaps_s), 0), nrow=batch_size)
         save_image(colormaps.float(), '{}/batch_{}_attmaps.png'.format(self.output_dir, batch_size))
 
-    def generate_attention_maps(self, batch, limit=3, inter=2/3, loc=-1):
+    def generate_attention_maps(self, batch):
         self.net_mode(train=False)
         self.VAE.zero_grad()
         self.D.zero_grad()
@@ -131,20 +123,7 @@ class Tester(BaseFactorVae):
             logvar = stats[:, self.VAE.z_dim:]
             z = self.VAE.reparametrize(mu, logvar)
 
-            # Swaping a latent channel per sample
-            """
-            for i in range(x.size(0)):
-                #lat = i % len(num_classes)
-                rand = torch.rand(1).item()
-                interpolation = torch.arange(-limit*rand, rand*limit+0.1, inter)
-                #z[i, lat] = torch.rand(1).item()#torch.randint(0, num_classes[lat],(1,)).item()
-                for val in interpolation:
-                    z[i,:] = val
-            """
             x_rec = F.sigmoid(self.VAE.decode(z).view(x.size())).data
-
-
-            # n_channels = x.shape[1]
 
             score = torch.sum(mu)
             score.backward(retain_graph=True)
@@ -271,7 +250,7 @@ def main():
     start = time.time()
 
     t = Tester(args)
-    t.test(3, 'ellipse')
+    t.test(3)
 
     print("Finished after {} seconds.".format(str(time.time() - start)))
 
